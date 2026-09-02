@@ -449,6 +449,11 @@ export class LibraryStore {
    *
    * The cap matters: the operator's eye should see "what just happened",
    * not the full history. Default 20 is enough to scan in one glance.
+   *
+   * Ties on `at` are broken by `id` descending. Without that, two events
+   * recorded in the same millisecond — which happens routinely, e.g. a
+   * purge that logs a warning and a success together — come back in
+   * arbitrary order and the timeline reads backwards.
    */
   recentActivity(limit: number = 20): Array<{
     id: number;
@@ -458,7 +463,7 @@ export class LibraryStore {
     detail: string | null;
   }> {
     const rows = this.#db
-      .prepare('SELECT id, at, kind, message, detail FROM activity ORDER BY at DESC LIMIT ?')
+      .prepare('SELECT id, at, kind, message, detail FROM activity ORDER BY at DESC, id DESC LIMIT ?')
       .all(limit) as Array<{ id: number; at: number; kind: string; message: string; detail: string | null }>;
     return rows.map((r) => ({
       id: Number(r.id),
@@ -729,6 +734,142 @@ export class LibraryStore {
       subtitles: Number(row?.['subtitles'] ?? 0),
       needsLookup: Number(row?.['needs_lookup'] ?? 0),
     };
+  }
+
+  /**
+   * Files for many titles in one query, grouped by title key.
+   *
+   * The admin library page needs every title's files to compute per-title
+   * account lists and torn-reel state. Calling `filesForTitle` in a loop cost
+   * one query per title per render pass, three passes deep — 3N queries for N
+   * titles. This is one query total.
+   */
+  filesForTitles(titleKeys: string[]): Map<string, LibraryFile[]> {
+    const out = new Map<string, LibraryFile[]>();
+    if (titleKeys.length === 0) return out;
+    // Chunked so a very large library cannot exceed SQLite's variable limit
+    // (999 by default).
+    const CHUNK = 500;
+    for (let i = 0; i < titleKeys.length; i += CHUNK) {
+      const chunk = titleKeys.slice(i, i + CHUNK);
+      const placeholders = chunk.map(() => '?').join(',');
+      const rows = this.#db
+        .prepare(
+          `SELECT * FROM files WHERE title_key IN (${placeholders})
+           ORDER BY COALESCE(resolution, 0) DESC, size DESC`,
+        )
+        .all(...chunk);
+      for (const row of rows) {
+        const file = toLibraryFile(row);
+        const list = out.get(file.titleKey);
+        if (list) list.push(file);
+        else out.set(file.titleKey, [file]);
+      }
+    }
+    // Titles with no files still get an entry, so callers can skip a null check.
+    for (const key of titleKeys) if (!out.has(key)) out.set(key, []);
+    return out;
+  }
+
+  /**
+   * Per-account library totals in one query. Powers the account cards and the
+   * per-account detail page without a fanout to Seedr.
+   */
+  perAccountStats(): Map<string, { titles: number; files: number; bytes: number }> {
+    const rows = this.#db
+      .prepare(
+        `SELECT account_id,
+                COUNT(DISTINCT title_key) AS titles,
+                COUNT(*)                  AS files,
+                COALESCE(SUM(size), 0)    AS bytes
+         FROM files
+         GROUP BY account_id`,
+      )
+      .all() as Array<{ account_id: string; titles: number; files: number; bytes: number }>;
+    return new Map(
+      rows.map((r) => [
+        String(r.account_id),
+        { titles: Number(r.titles), files: Number(r.files), bytes: Number(r.bytes) },
+      ]),
+    );
+  }
+
+  /** Titles holding at least one file on the given account, newest first. */
+  titlesForAccount(accountId: string): TitleSummary[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT t.key, t.name, t.year, t.kind, t.added_at,
+                t.imdb_id, t.tmdb_id,
+                COUNT(f.file_id) AS file_count,
+                COALESCE(SUM(f.size), 0) AS total_size,
+                MAX(f.resolution) AS best_resolution
+         FROM titles t
+         JOIN files f ON f.title_key = t.key
+         WHERE f.account_id = ?
+         GROUP BY t.key
+         ORDER BY t.added_at DESC`,
+      )
+      .all(accountId);
+    return rows.map(toTitleSummary);
+  }
+
+  /** Files held on one account, largest first. */
+  filesForAccount(accountId: string): Array<LibraryFile & { titleName: string }> {
+    const rows = this.#db
+      .prepare(
+        `SELECT f.*, t.name AS title_name
+         FROM files f
+         JOIN titles t ON t.key = f.title_key
+         WHERE f.account_id = ?
+         ORDER BY f.size DESC`,
+      )
+      .all(accountId) as Row[];
+    return rows.map((r) => ({ ...toLibraryFile(r), titleName: String(r['title_name']) }));
+  }
+
+  /**
+   * Activity rows mentioning an account, newest first.
+   *
+   * Filtering in SQL rather than in the page: the activity table is capped at
+   * 200 rows but the per-account page should not have to read all of them to
+   * show a handful. Ties on `at` break by `id` for the same reason as
+   * `recentActivity`.
+   */
+  activityForAccount(accountId: string, limit = 40): Array<{
+    id: number;
+    at: number;
+    kind: 'info' | 'success' | 'warn' | 'bad';
+    message: string;
+    detail: string | null;
+  }> {
+    const needle = `%${accountId}%`;
+    const rows = this.#db
+      .prepare(
+        `SELECT id, at, kind, message, detail FROM activity
+         WHERE message LIKE ? OR detail LIKE ?
+         ORDER BY at DESC, id DESC LIMIT ?`,
+      )
+      .all(needle, needle, limit) as Array<{
+        id: number; at: number; kind: string; message: string; detail: string | null;
+      }>;
+    return rows.map((r) => ({
+      id: Number(r.id),
+      at: Number(r.at),
+      kind: r.kind as 'info' | 'success' | 'warn' | 'bad',
+      message: String(r.message),
+      detail: r.detail === null ? null : String(r.detail),
+    }));
+  }
+
+  /** Clears the IMDb/TMDB ids for a title so the enricher looks it up again. */
+  clearTitleIds(key: string): void {
+    this.#db.prepare('UPDATE titles SET imdb_id = NULL, tmdb_id = NULL WHERE key = ?').run(key);
+  }
+
+  /** Clears every title's metadata ids. Used by "re-fetch all metadata". */
+  clearAllTitleIds(): number {
+    const r = this.#db.prepare('UPDATE titles SET imdb_id = NULL, tmdb_id = NULL').run();
+    return Number(r.changes);
   }
 
   /** Runs `fn` in a transaction, so a failed scan leaves no partial state. */

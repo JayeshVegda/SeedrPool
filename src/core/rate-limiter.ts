@@ -1,18 +1,31 @@
 /**
- * Global rate-limit coordination for the Seedr API.
+ * Rate-limit coordination for the Seedr API.
  *
- * Seedr throttles per client, not per endpoint or per account, so every caller
- * shares one budget. Without coordination each account retries independently and
- * they starve each other — which is exactly how a working account was pushed into
- * a throttled state during development (RESEARCH.md).
+ * Two facts drive the design, both measured (RESEARCH.md, and re-measured
+ * 2026-09-02 against the live 8-account pool):
  *
- * Two mechanisms:
- *   - a minimum gap between requests, so bursts are smoothed;
- *   - a shared cooldown, so one 429 pauses every caller rather than each
- *     discovering the throttle separately.
+ *   1. Throttling is enforced per account/token, not per client id. Eight
+ *      accounts issuing `list_contents` simultaneously all return 200 in
+ *      ~0.4s total. Eight parallel password grants likewise.
+ *   2. When a throttle *does* land, it is worth pausing every caller: the
+ *      original 429 came from hammering one account, and letting the other
+ *      seven keep going while one is cooling down risks the same escalation.
+ *
+ * So the limiter is split in two:
+ *
+ *   - a per-account **lane** enforces the minimum request gap. Requests on
+ *     different accounts never queue behind each other, which is what turns a
+ *     2.4s page render into a 0.3s one;
+ *   - a **shared cooldown** is global. One 429 anywhere pauses everyone, which
+ *     is the property the original design got right.
+ *
+ * The previous version funnelled every request through a single serial queue,
+ * making per-page latency `accounts × 250ms`. That is pure self-inflicted
+ * latency: the gap exists to avoid bursting one account, and requests to
+ * different accounts do not burst anything.
  */
 
-/** Minimum spacing between outbound API requests. */
+/** Minimum spacing between outbound API requests *on the same account*. */
 const MIN_REQUEST_GAP_MS = 250;
 
 /** How long to pause all callers after a throttle response. */
@@ -21,22 +34,40 @@ const DEFAULT_COOLDOWN_MS = 60_000;
 /** Ceiling on escalating cooldowns from repeated throttling. */
 const MAX_COOLDOWN_MS = 300_000;
 
+/** Serial queue plus last-send timestamp for one account. */
+interface Lane {
+  queue: Promise<void>;
+  lastRequestAt: number;
+}
+
 export class RateLimiter {
   #minGapMs: number;
-  #lastRequestAt = 0;
-  /** Unix ms until which all requests must wait. */
+  /**
+   * One lane per account key. Requests within a lane are spaced by
+   * `minGapMs`; requests in different lanes run concurrently.
+   */
+  #lanes = new Map<string, Lane>();
+  /** Unix ms until which all requests must wait. Shared across lanes. */
   #cooldownUntil = 0;
   /** Current cooldown length, doubling while throttling persists. */
   #cooldownMs: number;
+  /**
+   * The configured starting cooldown.
+   *
+   * Kept separate from `#cooldownMs` because `succeed()` and `reset()` need
+   * to return to the *configured* base, not the module default. The previous
+   * version hardcoded `DEFAULT_COOLDOWN_MS` in both, so a limiter built with
+   * a custom cooldown silently jumped to 60 s after its first clean request.
+   */
+  #baseCooldownMs: number;
   #maxCooldownMs: number;
-  /** Serializes gap enforcement so concurrent callers queue rather than race. */
-  #queue: Promise<void> = Promise.resolve();
 
   constructor(
     options: { minGapMs?: number; cooldownMs?: number; maxCooldownMs?: number } = {},
   ) {
     this.#minGapMs = options.minGapMs ?? MIN_REQUEST_GAP_MS;
-    this.#cooldownMs = options.cooldownMs ?? DEFAULT_COOLDOWN_MS;
+    this.#baseCooldownMs = options.cooldownMs ?? DEFAULT_COOLDOWN_MS;
+    this.#cooldownMs = this.#baseCooldownMs;
     this.#maxCooldownMs = options.maxCooldownMs ?? MAX_COOLDOWN_MS;
   }
 
@@ -51,26 +82,33 @@ export class RateLimiter {
   }
 
   /**
-   * Waits until a request may be sent.
+   * Waits until a request may be sent on `lane`.
    *
-   * Callers queue behind one another so the minimum gap is honoured across all
-   * accounts, not per account.
+   * `lane` should be the account id. Callers that genuinely share a budget
+   * (there are none today) can pass the same key. Omitting it puts the
+   * request in a shared `default` lane, which preserves the old serial
+   * behaviour for any caller that has not been updated.
    */
-  async acquire(): Promise<void> {
-    const wait = this.#queue.then(async () => {
+  async acquire(lane = 'default'): Promise<void> {
+    const entry = this.#lanes.get(lane) ?? { queue: Promise.resolve(), lastRequestAt: 0 };
+    this.#lanes.set(lane, entry);
+
+    const wait = entry.queue.then(async () => {
+      // The cooldown is global and re-checked inside the lane, so a throttle
+      // that lands while this request is queued still delays it.
       if (this.throttled) {
         await sleep(this.retryAfterMs);
       }
 
-      const since = Date.now() - this.#lastRequestAt;
+      const since = Date.now() - entry.lastRequestAt;
       if (since < this.#minGapMs) {
         await sleep(this.#minGapMs - since);
       }
 
-      this.#lastRequestAt = Date.now();
+      entry.lastRequestAt = Date.now();
     });
 
-    this.#queue = wait.catch(() => undefined);
+    entry.queue = wait.catch(() => undefined);
     return wait;
   }
 
@@ -94,14 +132,14 @@ export class RateLimiter {
 
   /** Resets the escalation after a clean request. */
   succeed(): void {
-    this.#cooldownMs = DEFAULT_COOLDOWN_MS;
+    this.#cooldownMs = this.#baseCooldownMs;
   }
 
   /** Clears all state. Test seam. */
   reset(): void {
     this.#cooldownUntil = 0;
-    this.#cooldownMs = DEFAULT_COOLDOWN_MS;
-    this.#lastRequestAt = 0;
+    this.#cooldownMs = this.#baseCooldownMs;
+    this.#lanes.clear();
   }
 }
 
@@ -112,7 +150,7 @@ function sleep(ms: number): Promise<void> {
 /**
  * Process-wide limiter.
  *
- * Deliberately module-level: the throttle is per Seedr client id, so one shared
- * instance is correct. A second instance would defeat the purpose.
+ * Shared so the cooldown is global, while the per-account lanes inside it keep
+ * healthy accounts from queueing behind each other.
  */
 export const seedrRateLimiter = new RateLimiter();

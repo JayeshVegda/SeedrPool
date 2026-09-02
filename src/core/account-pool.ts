@@ -112,6 +112,16 @@ export const READS_PER_SIGNED_URL = 2;
  */
 export const STATUS_TTL_MS = 60_000;
 
+/**
+ * How long a cached transfer list stays usable.
+ *
+ * Shorter than the status TTL because transfers are the one thing an operator
+ * watches change in real time. Long enough that the overview, the transfers
+ * page, and the header count rendered in the same few seconds cost one fanout
+ * between them rather than three.
+ */
+export const TRANSFERS_TTL_MS = 5_000;
+
 export interface AccountPoolEntry {
   provider: StorageProvider;
   label: string;
@@ -137,6 +147,10 @@ export class AccountPool {
   #lastRefreshAt = 0;
   /** Collapses concurrent probes into one. */
   #refreshInFlight: Promise<void> | null = null;
+  /** Cached transfer fanout, with the time it completed. */
+  #transfers: Array<Transfer & { accountId: string }> = [];
+  #transfersAt = 0;
+  #transfersInFlight: Promise<Array<Transfer & { accountId: string }>> | null = null;
 
   constructor(entries: AccountPoolEntry[]) {
     this.#entries = entries;
@@ -306,6 +320,16 @@ export class AccountPool {
     return this.#entries.find((e) => e.provider.accountId === accountId)?.provider;
   }
 
+  /** Cached status for one account, or undefined when it is not in the pool. */
+  status(accountId: string): AccountStatus | undefined {
+    return this.statuses().find((s) => s.accountId === accountId);
+  }
+
+  /** Number of accounts in the pool, healthy or not. */
+  get size(): number {
+    return this.#entries.length;
+  }
+
   /**
    * Chooses where to place `requiredBytes` of new content.
    *
@@ -412,8 +436,36 @@ export class AccountPool {
     this.#status.set(accountId, next);
   }
 
-  /** Transfers across all healthy accounts, tagged with their account. */
-  async listAllTransfers(): Promise<Array<Transfer & { accountId: string }>> {
+  /**
+   * Transfers across all healthy accounts, tagged with their account.
+   *
+   * Cached for `TRANSFERS_TTL_MS` and collapsed so concurrent callers share one
+   * fanout. Without this, rendering the overview cost one `list_contents` per
+   * account, and the overview plus the header count plus a page refresh
+   * tripled that. The fanout itself is parallel: per-account rate-limiter
+   * lanes mean eight accounts answer in about the time one does.
+   *
+   * `force` skips the cache, for the explicit "refresh" affordances.
+   */
+  async listAllTransfers(
+    options: { force?: boolean; staleAfterMs?: number } = {},
+  ): Promise<Array<Transfer & { accountId: string }>> {
+    const staleAfterMs = options.staleAfterMs ?? TRANSFERS_TTL_MS;
+    if (
+      !options.force &&
+      this.#transfersAt > 0 &&
+      Date.now() - this.#transfersAt < staleAfterMs
+    ) {
+      return this.#transfers;
+    }
+
+    this.#transfersInFlight ??= this.#doListAllTransfers().finally(() => {
+      this.#transfersInFlight = null;
+    });
+    return this.#transfersInFlight;
+  }
+
+  async #doListAllTransfers(): Promise<Array<Transfer & { accountId: string }>> {
     const results = await Promise.all(
       this.healthyProviders().map(async (provider) => {
         try {
@@ -425,7 +477,23 @@ export class AccountPool {
         }
       }),
     );
-    return results.flat();
+    this.#transfers = results.flat();
+    this.#transfersAt = Date.now();
+    return this.#transfers;
+  }
+
+  /**
+   * Cached transfers without triggering a fetch. Returns an empty list when
+   * nothing has been fetched yet. Used by render paths that want to show
+   * whatever is known without paying for a fanout.
+   */
+  cachedTransfers(): Array<Transfer & { accountId: string }> {
+    return this.#transfers;
+  }
+
+  /** Drops the cached transfer list, so the next read refetches. */
+  invalidateTransfers(): void {
+    this.#transfersAt = 0;
   }
 
   /**

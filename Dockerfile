@@ -18,7 +18,10 @@ RUN npm install --no-audit --no-fund
 
 COPY tsconfig.json ./
 COPY src ./src
-RUN ./node_modules/.bin/tsc
+# tsc emits only .ts files. The admin's client script is plain ES5 JavaScript
+# (so the browser runs it untranspiled), so it has to be copied alongside the
+# compiled output or the asset loader cannot find it at startup.
+RUN ./node_modules/.bin/tsc && npm run copy-assets
 
 FROM node:24-alpine AS runtime
 WORKDIR /app

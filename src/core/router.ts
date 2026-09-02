@@ -118,6 +118,12 @@ export function htmlResponse(body: string, init: ResponseInit = {}): Response {
   return new Response(body, { ...init, headers });
 }
 
+/**
+ * Re-exported from `core/assets.ts` so route handlers can serve cached
+ * static assets without importing the assets module directly.
+ */
+export { serveAsset } from './assets.ts';
+
 export function redirect(location: string, status = 303): Response {
   return new Response(null, { status, headers: { Location: location } });
 }

@@ -488,9 +488,14 @@ export class SeedrV1Provider implements StorageProvider {
     return accessToken;
   }
 
-  /** Every outbound request passes through the shared V1 limiter. */
+  /**
+   * Every outbound request passes through the shared V1 limiter, in this
+   * account's own lane. Requests to *different* accounts therefore run
+   * concurrently — measured safe (RESEARCH.md) — while requests to this
+   * account stay spaced by the minimum gap.
+   */
   async #fetch(url: URL, init: RequestInit): Promise<Response> {
-    await this.#limiter.acquire();
+    await this.#limiter.acquire(this.accountId);
     return fetch(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   }
 }
