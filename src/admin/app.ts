@@ -246,7 +246,7 @@ export class AdminApp {
             <div class="card-title">${icon('pie-chart', { size: 14 })} Node Space Distribution</div>
             <span class="pill muted">${formatBytes(kpis.storage.max)} total</span>
           </div>
-          ${this.#storageDonut(kpis.storageBreakdown)}
+          ${raw(this.#storageDonut(kpis.storageBreakdown))}
         </div>
 
         <div class="card col-6">
@@ -254,7 +254,7 @@ export class AdminApp {
             <div class="card-title">${icon('bar-chart-3', { size: 14 })} Media Quality</div>
             <span class="pill purple">${kpis.quality.uhd} 4K UHD</span>
           </div>
-          ${this.#qualityBars(kpis.quality)}
+          ${raw(this.#qualityBars(kpis.quality))}
         </div>
       </div>
 
@@ -386,7 +386,7 @@ export class AdminApp {
               <div class="kv"><span class="k">Status</span><span class="v">${raw(statePill)}</span></div>
               <div class="kv"><span class="k">Quota</span><span class="v">${detail.status.quota ? `${formatBytes(detail.status.quota.used)} / ${formatBytes(detail.status.quota.max)}` : '—'}</span></div>
               <div class="kv"><span class="k">Active streams</span><span class="v">${detail.status.activeStreams}</span></div>
-              <div class="kv"><span class="k">CDN</span><span class="v">${detail.status.cdnHealthy ? '<span style="color:var(--ok);">OK</span>' : `<span style="color:var(--warn);">${esc(detail.status.cdnReason ?? 'torn')}</span>`}</span></div>
+              <div class="kv"><span class="k">CDN</span><span class="v">${raw(detail.status.cdnHealthy ? '<span style="color:var(--ok);">OK</span>' : `<span style="color:var(--warn);">${esc(detail.status.cdnReason ?? 'torn')}</span>`)}</span></div>
               ${detail.status.cdnBrokenAt !== undefined ? html`<div class="kv"><span class="k">Quarantine</span><span class="v">${formatRelative(Date.now() - detail.status.cdnBrokenAt)} ago</span></div>` : ''}
               ${detail.ageDays !== null ? html`<div class="kv"><span class="k">Last file</span><span class="v">${detail.ageDays} day${detail.ageDays === 1 ? '' : 's'} ago</span></div>` : ''}
             </div>

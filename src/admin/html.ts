@@ -28,10 +28,17 @@ export function esc(value: unknown): string {
     .replaceAll("'", '&#39;');
 }
 
+const safeHtmlStrings = new Set<string>();
+
 export function html(strings: TemplateStringsArray, ...values: unknown[]): string {
   let out = strings[0] ?? '';
   for (let i = 0; i < values.length; i += 1) {
     out += renderValue(values[i]) + (strings[i + 1] ?? '');
+  }
+  safeHtmlStrings.add(out);
+  if (safeHtmlStrings.size > 1000) {
+    const first = safeHtmlStrings.values().next().value;
+    if (first !== undefined) safeHtmlStrings.delete(first);
   }
   return out;
 }
@@ -46,6 +53,7 @@ export type { Html };
 
 function renderValue(value: unknown): string {
   if (isRaw(value)) return value.value;
+  if (typeof value === 'string' && safeHtmlStrings.has(value)) return value;
   if (Array.isArray(value)) return value.map(renderValue).join('');
   if (value === null || value === undefined || value === false) return '';
   return esc(value);
