@@ -926,6 +926,10 @@ export class AdminApp {
           <form class="inline" method="post" action="/admin/accounts/reload" data-inline style="display:inline;">
             <button class="btn" type="submit" data-confirm="Reload credentials and rebuild the pool?"><i data-lucide="rotate-ccw"></i> Re-probe all</button>
           </form>
+          <form class="inline" method="post" action="/admin/dump" data-inline style="display:inline;">
+            <button class="btn" type="submit"><i data-lucide="database"></i> Dump now</button>
+          </form>
+          <a class="btn" href="/admin/dumps" data-nav><i data-lucide="archive"></i> Dumps</a>
         </div>
       </div>
 

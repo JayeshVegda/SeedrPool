@@ -1,13 +1,13 @@
 # Operations
 
-Day-to-day operations on a running SeedrPool. Read this if something is
-yellow, red, or silent in the admin console.
+Day-to-day operations on a running SeedrPool. Read this if something
+is yellow, red, or silent in the operator console.
 
 ## The operator console
 
 `https://seedr.zayu.dev/admin` (basic-auth).
 
-There are five pages:
+Five pages:
 
 * **Overview** — the signal bar (one cell per Seedr account), three KPIs
   (movies / files / free space), the Stremio addon URL, the ingest
@@ -15,37 +15,26 @@ There are five pages:
 * **Library** — one row per indexed movie with poster (TMDB art when
   available), title, year, quality, playback state (Direct / HLS /
   Mixed), the accounts it lives on, and inline actions (Stremio deep
-  link, Move, Copy link, Delete). Filter by typing.
+  link, Copy link, Move, Delete). Filter by typing.
 * **Transfers** — one row per in-flight Seedr transfer. The "No seeders"
-  pill means the swarm is dead — remove it to free the slot.
-* **Fleet** — one row per Seedr account with health pill (Healthy / Torn
-  reel / Offline / Bad password), used-storage bar, the streams count,
-  and per-row Purge + Remove buttons. Top-right **Add account** opens a
-  modal.
+  pills mean the swarm is dead — remove to free the slot.
+* **Fleet** — one row per Seedr account with health pill (Healthy /
+  Torn reel / Offline / Bad password), used-storage bar, the streams
+  count, and per-row Purge + Remove buttons. "Dump now" captures a
+  per-account JSON snapshot; "Dumps" jumps to the dump inventory.
 * **Activity** — full transaction history. Filter by account, kind, or
   time range. The last 500 events are kept (auto-pruned beyond that).
+* **Dumps** — latest JSON snapshot per account, with size and capture
+  time. Files themselves are read off the host (`data/dumps/`); this
+  page is just an inventory.
 
 ## Adding an account
 
 The fleet page's **Add account** button opens a modal asking for email
 and password. The handler **probes Seedr with a V1 password grant**
-before persisting, so a wrong password never lands on disk. If the
-password is correct, the credentials file is appended with one line
-(`email:password`) and the addon process is re-probed.
-
-```text
-acc1@email.com:correctpass
-acc2@email.com:correctpass
-acc3@email.com:correctpass
-...
-```
-
-The file is **append-only** — the positional `accN` ID is derived from the
-line number. Reordering or deleting a line renumbers every account and
-breaks the library DB. To remove an account, use the **Remove** button
-on the fleet page (or `git rm -f` from the credentials file before a
-restart); it preserves the library rows so the operator can re-add later
-without losing title mappings.
+before saving, so a wrong password never lands on disk. If the password
+is correct, the credentials file is appended with one line and the
+addon process is re-probed.
 
 ## Removing an account
 
@@ -62,10 +51,10 @@ next scan.
 
 ## Purging an account
 
-**Purge** is destructive. It walks every folder and file on the Seedr
-side of the named account, deletes each, and removes the corresponding
-library rows. The 30-minute CDN quarantine is reset so the next
-`ff_get` URL the account serves is treated as fresh. Use this when:
+**Purge** is destructive. It walks every Seedr folder/file on the named
+account, deletes each, and removes the corresponding library rows. The
+30-minute CDN quarantine is reset so the next `ff_get` URL the account
+serves is treated as fresh. Use this when:
 
 * the account's storage is full of junk and the operator wants a
   clean slate;
@@ -75,29 +64,52 @@ The fleet page's pool auto-skips the account for 30 minutes after a CDN
 404, but the underlying files are still on Seedr. Purge is the only way
 to free space.
 
-## CDN "torn reel"
+## Per-account JSON dumps
 
-Some Seedr CDN pools (`rd12.seedr.cc` and similar) return 404 for the
-direct-download URL of certain accounts, even for freshly minted links.
-SeedrPool handles this automatically:
+Every six hours, plus on demand from the **Dump now** button on the
+fleet page (POST `/admin/dump`), each Seedr account is snapshotted to
+`SEEDRPOOL_DUMPS_DIR/accN.<unixMs>.json`. The default directory is
+`/app/data/dumps` (in the container) which is the same Docker volume as
+the library SQLite, so dumps survive container restarts.
 
-1. `getPlaybackUrl` issues a 128-byte range request to probe the URL.
-2. If 200, the URL is served as-is and the operator gets a 302 redirect.
-3. If 404, the addon looks up the file via `get_folder` to find
-   `presentation_urls.video.hls` and returns the HLS playlist URL
-   instead.
-4. The account is marked `cdnHealthy = false` for 30 minutes (the
-   `CDN_QUARANTINE_MS`), and the pool allocator stops placing new
-   content on it during that window.
+Each dump looks like:
 
-Stremio's iOS, Android, and TV clients all support HLS. The desktop
-player (VLC, MPV) also does. So torn-reel accounts remain playable —
-they just require a player that handles `.m3u8`.
+```json
+{
+  "accountId": "acc1",
+  "email": "you@example.com",
+  "capturedAt": 1735689600000,
+  "token": {
+    "issuedAt": 1735689336,
+    "expiresIn": 2410477,
+    "prefix": "df00aa",
+    "suffix": "9f35"
+  },
+  "quota": { "used": 4521984000, "max": 8053063680, "free": 3531079680 },
+  "root": {
+    "folders": [
+      { "id": "1432717205", "name": "In.the.Mood.For.Love.2000…", "size": 4581984000 }
+    ],
+    "files": [
+      { "id": "5984133767", "name": "In.the.Mood.For.Love.mkv", "size": 4521984000, "folderId": "1432717205" }
+    ]
+  },
+  "transfers": [
+    { "id": "196071038", "name": "Big.Buck.Bunny…", "state": "running", "progress": 23, "size": 763482113, "seeders": 4, "leechers": 1, "error": null }
+  ]
+}
+```
 
-After 30 minutes the account is retried on the next `play` request. If
-the CDN recovered (Seedr rotates its CDN pool periodically), the account
-returns to `Direct` automatically. If it didn't, the account stays in
-the `Torn reel` quarantine for another 30 minutes.
+The access token is **masked**: the full `sdo_…` string is never in
+the file. The operator can read the dump directly off the host with
+`cat data/dumps/acc1.<ts>.json | jq` or open the **Dumps** page for an
+inventory. The Dumper prunes to the most recent 5 files per account
+(`Dumper({ keepPerAccount: 5 })`) — older dumps are deleted on the next
+run.
+
+**No secrets in the dump.** `prefix` (6 chars) + `suffix` (4 chars) is
+enough to detect token rotation in logs but cannot be used to
+authenticate against Seedr.
 
 ## Transfer watching
 
@@ -109,40 +121,20 @@ longer there, the watcher:
 2. Fires the metadata enricher so any new files get an IMDb id.
 3. Records the completion in the activity log.
 
-The poll cadence is **N accounts × `POLL_INTERVAL_MS`** (default 30 s
-per account). For the seedr.zayu.dev deploy that's 8 × 30 s. The
-rate-limiter adds a 250 ms minimum gap between outbound API requests,
-which Seedr's per-client quota absorbs comfortably. For a 50-account
-pool, increase `POLL_INTERVAL_MS` in `src/core/transfer-watcher.ts`
-proportionally (or just accept the lower per-account cadence — the
-watcher only re-scans accounts whose transfer list changed, so the
-overhead is a list call, not a full folder walk).
+The poll budget is **N accounts × `POLL_INTERVAL_MS`** (default 30 s
+per account). For the seedr.zayu.dev deploy that's 8 × 30 s. For a
+50-account pool, increase `POLL_INTERVAL_MS` in
+`src/core/transfer-watcher.ts` proportionally (or just accept the lower
+per-account cadence — the watcher only re-scans accounts whose transfer
+list changed, so the overhead is a list call, not a full folder walk).
 
-## Activity log
+## Backup and restore
 
-Every operator-actionable event flows through the activity log. There
-are four kinds:
-
-* `info` — successful, normal events (magnet added, transfer completed,
-  account re-probed, reindex started).
-* `success` — explicit positive outcomes (file moved, file deleted,
-  TMDB match found).
-* `warn` — recoverable problems (torn reel detected, source deletion
-  failed during a Move, but the new file is in place).
-* `bad` — failures (purge failed, Seedr rejected credentials).
-
-The activity table is capped at 500 rows. Older rows are auto-pruned. The
-activity page is the right place to look when something is "off" — the
-exact failure message is there.
-
-## Backing up the library DB
-
-The library DB is a single sqlite file at
-`/opt/stacks/sites/seedrpool/data/library.sqlite` (or wherever
-`SEEDRPOOL_DB_PATH` points). To back up:
+The library DB is a single sqlite file at `data/library.sqlite`. To
+back up:
 
 ```bash
-sqlite3 /opt/stacks/sites/seedrpool/data/library.sqlite \
+sqlite3 /opt/stacks/compose/seedrpool/data/library.sqlite \
   ".backup '/opt/stacks/backups/seedrpool-$(date +%F).sqlite'"
 ```
 
@@ -155,15 +147,8 @@ regenerable is the `magnet` field on each file (the original URL the
 operator pasted in). If you back up the DB periodically, you preserve
 the ability to re-add magnets without re-pasting.
 
-## Restoring after a Seedr rate-limit window
-
-Seedr's V1 password grant can be rate-limited if too many logins happen
-in a short window. The symptoms are: an account's `healthCheck` returns
-`access_denied` or a 429 status; the account shows as `Offline` or
-`Bad password`; the indexer skips it. Recovery is automatic — the
-next `play` request retries the login. If you need it sooner, click
-**Reload credentials** on the fleet page; the pool refreshes every
-account's token.
+The dumps directory (`data/dumps/`) is on the same Docker volume and
+backed up the same way.
 
 ## Hard restart
 
