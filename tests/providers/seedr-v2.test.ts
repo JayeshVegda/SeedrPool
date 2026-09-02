@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TokenStore } from '../src/core/token-store.ts';
+import { TokenStore } from '../../src/core/token-store.ts';
 import {
   SeedrV2Provider,
   ReauthRequiredError,
@@ -11,7 +11,7 @@ import {
   describeError,
   toTransfer,
   makeQuota,
-} from '../src/providers/seedr-v2.ts';
+} from '../../src/providers/seedr-v2.ts';
 
 let dir: string;
 let path: string;

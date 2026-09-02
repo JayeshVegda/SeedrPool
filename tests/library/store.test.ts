@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { LibraryStore } from '../src/library/store.ts';
+import { LibraryStore } from '../../src/library/store.ts';
 
 describe('LibraryStore', () => {
   let store: LibraryStore;

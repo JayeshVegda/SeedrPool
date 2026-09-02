@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, readFile, writeFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TokenStore, parseEnv, groupAccounts, serializeAccounts } from '../src/core/token-store.ts';
-import type { AccountRecord } from '../src/core/types.ts';
+import { TokenStore, parseEnv, groupAccounts, serializeAccounts } from '../../src/core/token-store.ts';
+import type { AccountRecord } from '../../src/core/types.ts';
 
 let dir: string;
 let path: string;

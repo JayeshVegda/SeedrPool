@@ -1,14 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { Indexer, guessLanguage } from '../src/library/indexer.ts';
-import { LibraryStore } from '../src/library/store.ts';
+import { Indexer, guessLanguage } from '../../src/library/indexer.ts';
+import { LibraryStore } from '../../src/library/store.ts';
 import type {
   FolderContents,
   PlaybackUrl,
   Quota,
   StorageProvider,
   Transfer,
-} from '../src/core/types.ts';
-import type { AccountPool } from '../src/core/account-pool.ts';
+} from '../../src/core/types.ts';
+import type { AccountPool } from '../../src/core/account-pool.ts';
 
 class FakeProvider {
   readonly accountId: string;

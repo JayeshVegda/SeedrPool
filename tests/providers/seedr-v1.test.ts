@@ -4,9 +4,9 @@ import {
   InvalidCredentialsError,
   isV1RateLimited,
   toTransfer,
-} from '../src/providers/seedr-v1.ts';
-import { RateLimitError, SeedrApiError } from '../src/providers/shared.ts';
-import { RateLimiter } from '../src/core/rate-limiter.ts';
+} from '../../src/providers/seedr-v1.ts';
+import { RateLimitError, SeedrApiError } from '../../src/providers/shared.ts';
+import { RateLimiter } from '../../src/core/rate-limiter.ts';
 
 const CREDENTIAL = { id: 'acc1', email: 'jay@example.com', password: 'hunter2' };
 

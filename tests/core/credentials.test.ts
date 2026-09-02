@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCredentials } from '../src/core/credentials.ts';
+import { parseCredentials } from '../../src/core/credentials.ts';
 
 describe('parseCredentials', () => {
   it('assigns positional ids starting at acc1', () => {

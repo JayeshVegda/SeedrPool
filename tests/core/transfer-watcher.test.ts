@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { TransferWatcher } from '../src/core/transfer-watcher.ts';
-import { LibraryStore } from '../src/library/store.ts';
-import { Indexer } from '../src/library/indexer.ts';
+import { TransferWatcher } from '../../src/core/transfer-watcher.ts';
+import { LibraryStore } from '../../src/library/store.ts';
+import { Indexer } from '../../src/library/indexer.ts';
 import type {
   AccountPool,
-} from '../src/core/account-pool.ts';
-import type { Transfer } from '../src/core/types.ts';
-import type { StorageProvider } from '../src/core/types.ts';
+} from '../../src/core/account-pool.ts';
+import type { Transfer } from '../../src/core/types.ts';
+import type { StorageProvider } from '../../src/core/types.ts';
 
 class FakeProvider {
   readonly accountId: string;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { esc, html, raw, formatBytes, layout } from '../src/admin/html.ts';
+import { esc, html, raw, formatBytes, layout } from '../../src/admin/html.ts';
 import {
   Router,
   json,
@@ -7,7 +7,7 @@ import {
   redirect,
   withCors,
   requireBasicAuth,
-} from '../src/core/router.ts';
+} from '../../src/core/router.ts';
 
 describe('esc', () => {
   it('escapes every HTML-significant character', () => {

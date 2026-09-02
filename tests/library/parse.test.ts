@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseMediaName, mediaKey, normalizeTitle } from '../src/library/parse.ts';
+import { parseMediaName, mediaKey, normalizeTitle } from '../../src/library/parse.ts';
 
 describe('parseMediaName', () => {
   it('parses a clean movie', () => {

@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { TmdbClient, posterUrl, backdropUrl } from '../src/library/tmdb.ts';
-import { MetadataEnricher } from '../src/library/metadata-enricher.ts';
-import { LibraryStore } from '../src/library/store.ts';
-import type { LibraryTitle } from '../src/library/store.ts';
-import type { TmdbMatch, TitleQuery } from '../src/library/tmdb.ts';
+import { TmdbClient, posterUrl, backdropUrl } from '../../src/library/tmdb.ts';
+import { MetadataEnricher } from '../../src/library/metadata-enricher.ts';
+import { LibraryStore } from '../../src/library/store.ts';
+import type { LibraryTitle } from '../../src/library/store.ts';
+import type { TmdbMatch, TitleQuery } from '../../src/library/tmdb.ts';
 
 function match(overrides: Partial<TmdbMatch> = {}): TmdbMatch {
   return {

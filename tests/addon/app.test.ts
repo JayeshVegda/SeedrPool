@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { AddonApp, parseExtra, posterSvg, unwrapId } from '../src/addon/app.ts';
-import { LibraryStore } from '../src/library/store.ts';
-import type { Config } from '../src/core/config.ts';
-import type { AccountPool } from '../src/core/account-pool.ts';
-import type { PlaybackUrl, StorageProvider } from '../src/core/types.ts';
+import { AddonApp, parseExtra, posterSvg, unwrapId } from '../../src/addon/app.ts';
+import { LibraryStore } from '../../src/library/store.ts';
+import type { Config } from '../../src/core/config.ts';
+import type { AccountPool } from '../../src/core/account-pool.ts';
+import type { PlaybackUrl, StorageProvider } from '../../src/core/types.ts';
 
 const config: Config = {
   port: 0,

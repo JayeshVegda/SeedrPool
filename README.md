@@ -1,46 +1,164 @@
+<div align="center">
+
+<img src="assets/logo.svg" alt="SeedrPool" width="96" height="96"/>
+
 # SeedrPool
 
-Private multi-account Seedr media platform.
+**One Stremio library. Many Seedr accounts. Zero copy-paste between them.**
 
-## Goal
+[![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg?style=flat)](LICENSE)
+[![Node](https://img.shields.io/badge/Node-24-339933.svg?style=flat&logo=node.js&logoColor=white)](https://nodejs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178c6.svg?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![Tests](https://img.shields.io/badge/Tests-246-brightgreen.svg?style=flat)](tests)
+[![Stremio](https://img.shields.io/badge/For-Stremio-7b5bf5.svg?style=flat)](https://stremio.com)
+[![Dependencies](https://img.shields.io/badge/Runtime_deps-0-22c55e.svg?style=flat)](package.json)
 
-Make eight Seedr accounts behave like one intelligent media library for movies and
-TV, totalling 52 GiB.
+SeedrPool makes 8 Seedr.cc accounts (~52 GiB total) behave as **one**
+Stremio library. Add a magnet once; it lands on the right account; the
+right Stremio user sees it. No torrent search, no scraping, no second
+dashboard — a focused tool for the operator who already has a Seedr
+fleet.
 
-Users interact primarily through Stremio.
+[**Quick start**](#quick-start) · [**How it works**](#how-it-works) · [**Architecture**](docs/ARCHITECTURE.md) · [**Install**](docs/INSTALL.md) · [**Operations**](docs/OPERATIONS.md) · [**API**](docs/API.md)
 
-### Features
+</div>
 
-* 8 Seedr accounts → one library
-* automatic account selection
-* automatic storage cleanup
-* movie/TV indexing
-* duplicate removal
-* magnet support
-* playback through Stremio
-* subtitle support
-* private VPS deployment
+---
 
-Torrent/search discovery is deliberately out of scope; magnets are added manually.
+## Why SeedrPool exists
 
-## Configuration
+Seedr's web UI and mobile app are built around **one account, one
+library**. The Stremio addon protocol assumes the same: one addon, one
+library. If you operate two or more Seedr accounts — a personal one, a
+shared one with a friend, a test account — you can't realistically use
+either through Stremio. You either juggle manifest URLs or stay in
+Seedr's own UI.
 
-Accounts come from `/opt/stacks/.secrets/seedrpool-credentials.txt`, one
-`email:password` per line, mode 0600. Ids are positional (line 1 is `acc1`), so
-the file is **append-only** — reordering or deleting a line renumbers the accounts
-below it.
+SeedrPool is a small Node process that sits in front of a fleet of Seedr
+accounts and pretends to be one. It exposes a single Stremio addon URL.
+Behind that URL, an indexer walks every account, dedupes by file name,
+resolves IMDb ids via TMDB, and serves streams from whichever account
+has the file. The operator's friend sees one library; the operator
+sees eight accounts behind the scenes.
 
-Reload accounts from `/admin/accounts` after editing; no restart needed.
+## Features
 
-## Project Files
+- **One addon URL, one library, eight accounts.** Add a magnet in the
+  operator console; it lands on the account with the most free space.
+- **Stremio deep links** on every row, ready to paste into Stremio's
+  addon search.
+- **Direct + HLS streaming.** Default CDN is the Seedr `ff_get` URL;
+  accounts whose CDN returns 404 (the "torn reel" case) fall back to
+  the file's HLS playlist automatically.
+- **Live activity log** with filters for account, kind, and time
+  range. Every operator action is recorded.
+- **CDN-health quarantine** — accounts with a freshly-404'd CDN are
+  paused from new content for 30 minutes, then retried.
+- **Multi-magnet paste** in the ingest form. One per line.
+- **Inline form actions** with no full page navigation. The operator
+  console feels like a single-page app but ships zero JS to the
+  browser.
+- **Zero runtime dependencies.** `node:sqlite` and `fetch` from Node 24.
+  `npm install` is for `tsc` and `vitest` only.
 
-* `agents.md` — instructions for coding agents
-* `plan.md` — implementation roadmap
-* `ARCHITECTURE.md` — system design
-* `RESEARCH.md` — technical research, measured vs documented
+## Quick start
 
-## Status
+```bash
+git clone https://github.com/JayeshVegda/SeedrPool
+cd SeedrPool
+npm install
+npm run build
+```
 
-Phases 0-2 complete: all 8 accounts healthy, admin page deployed at
-`seedr.zayu.dev`. Phase 3 (library index) and Phase 4 (Stremio addon) are next —
-the addon manifest URL is reserved but not yet served.
+Create the secrets files the addon expects:
+
+```bash
+mkdir -p ../.secrets
+echo 'you@example.com:correctpassword' > ../.secrets/seedrpool-credentials.txt
+echo 'some-url-safe-string' > ../.secrets/seedrpool-addon-secret
+chmod 600 ../.secrets/*
+```
+
+Edit `docker-compose.yml` to mount the secrets and data directory, then:
+
+```bash
+cd /opt/stacks/compose/seedrpool
+docker compose build
+docker compose up -d
+docker compose logs --tail=20 seedrpool
+```
+
+The manifest URL prints in the logs. Paste it into **Stremio → Add-ons →
+Community → paste manifest URL**. The full [install guide](docs/INSTALL.md)
+covers Caddy, Cloudflare, env vars, and the runtime layout.
+
+## How it works
+
+1. **On boot**, SeedrPool probes every Seedr account with the V1
+   password grant (`client_id=seedr_chrome`) and reports the result.
+2. **Initial scan** walks every account's folder tree, normalizes file
+   names to a `title_key`, and upserts `titles` + `files` rows in
+   `node:sqlite` (WAL).
+3. **Transfer watcher** polls each account every 30 seconds. When a
+   transfer disappears, that account is re-scanned and the new files
+   pick up the indexer.
+4. **Enricher** runs TMDB search on each unindexed title. IMDb id is
+   written to the row, the indexer's `setOnScanComplete` hook triggers
+   it within seconds of a new file landing — not on a 30-min poll.
+5. **Stremio client** browses `/<secret>/catalog/movie/...` and gets
+   IMDb-id entries. Clicking one calls
+   `/<secret>/stream/movie/tt...`; the addon returns a 302 redirect to
+   the Seedr CDN URL (or the HLS playlist if the CDN is torn).
+
+![Architecture](assets/architecture.svg)
+
+## Project layout
+
+```text
+SeedrPool/
+├── src/
+│   ├── addon/           Stremio addon endpoints (manifest, catalog,
+│   │                    meta, stream, subtitles, play)
+│   ├── admin/           basic-auth operator console + html tagged template
+│   ├── core/            pool, watcher, router, rate-limiter, config,
+│   │                    credentials, token-store, types
+│   ├── library/         indexer, parser, store, enricher, TMDB client
+│   ├── providers/       seedr-v1 (the only viable path), seedr-v2 (legacy)
+│   └── index.ts         wiring: pool, indexer, enricher, watcher, server
+├── tests/               mirrors src/ subdirs; 246 tests across 15 files
+│   ├── addon/
+│   ├── admin/
+│   ├── core/
+│   ├── library/
+│   └── providers/
+├── docs/
+│   ├── ARCHITECTURE.md  design notes + system map
+│   ├── INSTALL.md       Docker / Node / Caddy / env vars
+│   ├── OPERATIONS.md    day-to-day (add account, purge, torn reel)
+│   └── API.md           Stremio addon + admin console endpoints
+├── assets/              inline SVG logo + architecture diagram
+├── .github/workflows/   CI (typecheck + tests)
+├── Dockerfile           multi-stage, runtime image has no toolchain
+├── package.json         zero runtime dependencies
+├── tsconfig.json        strict mode + noUncheckedIndexedAccess
+├── LICENSE              MIT
+├── CONTRIBUTING.md      what the operator will and won't accept
+└── CHANGELOG.md         version history
+```
+
+## Development
+
+```bash
+npm run typecheck   # tsc --noEmit
+npm test            # vitest run (246 tests)
+npm test:watch      # vitest (re-runs on change)
+npm run build       # tsc → dist/
+npm start           # node dist/index.js
+```
+
+CI runs on every push and PR to `main`:
+typecheck → vitest → docker build. All three must pass.
+
+## License
+
+[MIT](LICENSE) — Copyright (c) 2025 Jayesh Vegda

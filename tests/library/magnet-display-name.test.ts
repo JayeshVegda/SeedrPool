@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { magnetDisplayName } from '../src/admin/app.ts';
+import { magnetDisplayName } from '../../src/admin/app.ts';
 
 describe('magnetDisplayName', () => {
   it('extracts and decodes the dn= parameter', () => {

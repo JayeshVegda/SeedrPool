@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TokenStore } from '../src/core/token-store.ts';
-import { completeAuth, type PendingAuth } from '../src/core/onboarding.ts';
-import { isRateLimited, RateLimitError, pollDeviceCode } from '../src/providers/seedr-v2.ts';
+import { TokenStore } from '../../src/core/token-store.ts';
+import { completeAuth, type PendingAuth } from '../../src/core/onboarding.ts';
+import { isRateLimited, RateLimitError, pollDeviceCode } from '../../src/providers/seedr-v2.ts';
 
 let dir: string;
 let store: TokenStore;
