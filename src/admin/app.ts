@@ -27,8 +27,7 @@ import type { LibraryFile, LibraryStore, TitleSummary } from '../library/store.t
 import { posterUrl, backdropUrl, type TmdbMatch } from '../library/tmdb.ts';
 // (no extra imports needed)
 
-const MAX_TITLE_KEYS_IN_LIB = 2000;
-const RECENT_ACTIVITY = 12;
+const RECENT_ACTIVITY = 24;
 
 export class AdminApp {
   #getPool: () => AccountPool;
@@ -283,7 +282,7 @@ export class AdminApp {
         title: 'Overview',
         activeNav: '/admin',
         activeTransfers,
-        signalCols: Math.max(2, Math.min(statuses.length, 8)),
+        // grid auto-fits in CSS; no per-page signalCols needed
         body,
       }),
     );
@@ -292,7 +291,7 @@ export class AdminApp {
   // ---------- Library (movie only, with TMDB art) ----------
 
   async library(): Promise<Response> {
-    const titles = this.#library.listTitles({ kind: 'movie', limit: MAX_TITLE_KEYS_IN_LIB });
+    const titles = this.#library.listTitles({ kind: 'movie' });
     const duplicates = this.#library.duplicateGroups();
     const storedMagnets = this.#library.listMagnets();
     const statuses = await this.#pool.refresh();
@@ -773,7 +772,7 @@ export class AdminApp {
       layout({
         title: 'Fleet',
         activeNav: '/admin/accounts',
-        signalCols: Math.max(2, Math.min(statuses.length, 8)),
+        // grid auto-fits in CSS; no per-page signalCols needed
         body,
       }),
     );
@@ -897,7 +896,7 @@ export class AdminApp {
     const kind = url.searchParams.get('kind') ?? '';
     const since = Number(url.searchParams.get('since') ?? 0); // unix ms
     const until = Number(url.searchParams.get('until') ?? 0);
-    const events = this.#library.recentActivity(500);
+    const events = this.#library.recentActivity(1000);
     const accounts = [...new Set(events.map((e) => extractAccountFromDetail(e.message, e.detail) ?? '').filter(Boolean))];
     const kinds: Array<'info' | 'success' | 'warn' | 'bad'> = ['info', 'success', 'warn', 'bad'];
 

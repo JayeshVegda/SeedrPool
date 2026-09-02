@@ -109,10 +109,14 @@ longer there, the watcher:
 2. Fires the metadata enricher so any new files get an IMDb id.
 3. Records the completion in the activity log.
 
-The poll budget is the limiting factor. 8 accounts × 30 s = one
-`get_torrents` per account per 30 s. Seedr's rate limit tolerates this;
-doubling the pool to 16 would push against the limit and start producing
-transient 429s on the account whose number falls unlucky.
+The poll cadence is **N accounts × `POLL_INTERVAL_MS`** (default 30 s
+per account). For the seedr.zayu.dev deploy that's 8 × 30 s. The
+rate-limiter adds a 250 ms minimum gap between outbound API requests,
+which Seedr's per-client quota absorbs comfortably. For a 50-account
+pool, increase `POLL_INTERVAL_MS` in `src/core/transfer-watcher.ts`
+proportionally (or just accept the lower per-account cadence — the
+watcher only re-scans accounts whose transfer list changed, so the
+overhead is a list call, not a full folder walk).
 
 ## Activity log
 

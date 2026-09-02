@@ -1,5 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 380" width="800" height="380" role="img" aria-label="SeedrPool architecture">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 420" width="800" height="420" role="img" aria-label="SeedrPool architecture">
   <title>SeedrPool architecture</title>
+  <desc>Stremio client (left) calls the SeedrPool Stremio addon (centre), which polls N Seedr accounts (right) every 30 seconds. The library DB (bottom) holds the merged index.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#0e1014"/>
@@ -9,99 +10,105 @@
       <stop offset="0" stop-color="#3a3f4b"/>
       <stop offset="1" stop-color="#262a33"/>
     </linearGradient>
+    <pattern id="grid" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#1c2230" stroke-width="0.5"/>
+    </pattern>
     <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="#7e8693"/>
     </marker>
   </defs>
-  <rect x="0" y="0" width="800" height="380" fill="url(#bg)"/>
-  <text x="400" y="32" text-anchor="middle" fill="#d4a259" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="11" letter-spacing="3" opacity="0.85">SEEDRPOOL  ARCHITECTURE</text>
-  <text x="400" y="50" text-anchor="middle" fill="#7e8693" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="12" opacity="0.7">Stremio client ← → single virtual library, despite N Seedr accounts underneath</text>
+  <rect x="0" y="0" width="800" height="420" fill="url(#bg)"/>
+  <text x="400" y="32" text-anchor="middle" fill="#6ea8fe" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="11" letter-spacing="3" opacity="0.85">SEEDRPOOL  ARCHITECTURE</text>
+  <text x="400" y="50" text-anchor="middle" fill="#7e8693" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="12" opacity="0.7">Stremio ← → one virtual library, despite N Seedr accounts underneath</text>
 
   <!-- Client tier -->
   <g transform="translate(40, 90)">
-    <rect x="0" y="0" width="160" height="240" rx="10" fill="#262a33" stroke="#3a3f4b" stroke-width="1.5"/>
-    <text x="80" y="28" text-anchor="middle" fill="#d4a259" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="11" font-weight="600">Stremio</text>
+    <rect x="0" y="0" width="160" height="260" rx="10" fill="#262a33" stroke="#3a3f4b" stroke-width="1.5"/>
+    <text x="80" y="28" text-anchor="middle" fill="#6ea8fe" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="11" font-weight="600">Stremio</text>
     <text x="80" y="44" text-anchor="middle" fill="#7e8693" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="10" opacity="0.8">one client</text>
     <line x1="20" y1="60" x2="140" y2="60" stroke="#3a3f4b" stroke-width="1"/>
     <text x="20" y="84" fill="#e6ebf2" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="10">imdb_id =</text>
-    <text x="20" y="100" fill="#d4a259" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="10">tt0118694</text>
+    <text x="20" y="100" fill="#6ea8fe" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="10">tt0118694</text>
     <text x="20" y="124" fill="#7e8693" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="9" opacity="0.7">browse catalog</text>
     <text x="20" y="138" fill="#7e8693" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="9" opacity="0.7">click title</text>
     <text x="20" y="160" fill="#7e8693" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="9" opacity="0.7">→ "play"</text>
     <text x="20" y="184" fill="#7e8693" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="9" opacity="0.7">addon called:</text>
-    <text x="20" y="200" fill="#d4a259" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">/stream/movie/tt...</text>
+    <text x="20" y="200" fill="#6ea8fe" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">/stream/movie/tt...</text>
     <text x="20" y="222" fill="#e6ebf2" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="9">← 302 redirect</text>
   </g>
 
   <!-- Server tier (middle) -->
   <g transform="translate(260, 90)">
-    <rect x="0" y="0" width="280" height="240" rx="10" fill="#1c2230" stroke="#d4a259" stroke-width="1.5"/>
-    <text x="140" y="28" text-anchor="middle" fill="#d4a259" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="12" font-weight="600">SeedrPool</text>
+    <rect x="0" y="0" width="280" height="260" rx="10" fill="#1c2230" stroke="#6ea8fe" stroke-width="1.5"/>
+    <text x="140" y="28" text-anchor="middle" fill="#6ea8fe" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="12" font-weight="600">SeedrPool</text>
     <text x="140" y="44" text-anchor="middle" fill="#7e8693" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="10" opacity="0.8">one process, one library, one addon</text>
 
     <g transform="translate(20, 64)">
       <rect x="0" y="0" width="240" height="36" rx="5" fill="#262a33" stroke="#3a3f4b"/>
-      <text x="10" y="22" fill="#d4a259" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="10">router</text>
+      <text x="10" y="22" fill="#6ea8fe" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="10">router</text>
       <text x="120" y="22" fill="#7e8693" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">GET /manifest.json</text>
     </g>
     <g transform="translate(20, 108)">
       <rect x="0" y="0" width="240" height="36" rx="5" fill="#262a33" stroke="#3a3f4b"/>
-      <text x="10" y="22" fill="#d4a259" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="10">catalog</text>
+      <text x="10" y="22" fill="#6ea8fe" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="10">catalog</text>
       <text x="120" y="22" fill="#7e8693" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">GET /catalog/movie/…</text>
     </g>
     <g transform="translate(20, 152)">
       <rect x="0" y="0" width="240" height="36" rx="5" fill="#262a33" stroke="#3a3f4b"/>
-      <text x="10" y="22" fill="#d4a259" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="10">stream</text>
+      <text x="10" y="22" fill="#6ea8fe" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="10">stream</text>
       <text x="120" y="22" fill="#7e8693" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">GET /play/acc/...</text>
     </g>
     <g transform="translate(20, 196)">
       <rect x="0" y="0" width="240" height="28" rx="5" fill="#262a33" stroke="#3a3f4b"/>
-      <text x="10" y="18" fill="#d4a259" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="10">indexer</text>
+      <text x="10" y="18" fill="#6ea8fe" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="10">indexer</text>
       <text x="120" y="18" fill="#7e8693" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">poll + enrich</text>
     </g>
   </g>
 
-  <!-- Account pool (right) -->
+  <!-- Account pool (right): show generic N accounts with auto-fit grid -->
   <g transform="translate(600, 90)">
-    <rect x="0" y="0" width="160" height="240" rx="10" fill="#1c2230" stroke="#3a3f4b" stroke-width="1.5"/>
-    <text x="80" y="28" text-anchor="middle" fill="#d4a259" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="11" font-weight="600">Seedr pool</text>
-    <text x="80" y="44" text-anchor="middle" fill="#7e8693" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="10" opacity="0.8">8 accounts × ~6.5 GB</text>
+    <rect x="0" y="0" width="160" height="260" rx="10" fill="#1c2230" stroke="#3a3f4b" stroke-width="1.5"/>
+    <rect x="0" y="0" width="160" height="260" rx="10" fill="url(#grid)" opacity="0.5"/>
+    <text x="80" y="28" text-anchor="middle" fill="#6ea8fe" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="11" font-weight="600">Seedr pool</text>
+    <text x="80" y="44" text-anchor="middle" fill="#7e8693" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="10" opacity="0.8">N accounts</text>
     <line x1="20" y1="60" x2="140" y2="60" stroke="#3a3f4b" stroke-width="1"/>
+
     <g transform="translate(0, 75)">
+      <!-- 4 representative cells; the rest are implied -->
       <g transform="translate(20, 0)">
-        <rect width="120" height="20" rx="3" fill="url(#acc)" stroke="#d4a259" stroke-width="0.5"/>
-        <text x="60" y="14" text-anchor="middle" fill="#d4a259" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">acc1  5.2/7.5 GB</text>
+        <rect width="120" height="20" rx="3" fill="url(#acc)" stroke="#6ea8fe" stroke-width="0.5"/>
+        <text x="60" y="14" text-anchor="middle" fill="#6ea8fe" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">acc1  5.2/7.5</text>
       </g>
       <g transform="translate(20, 25)">
-        <rect width="120" height="20" rx="3" fill="url(#acc)" stroke="#d4a259" stroke-width="0.5"/>
-        <text x="60" y="14" text-anchor="middle" fill="#d4a259" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">acc2  0.4/6.5 GB</text>
+        <rect width="120" height="20" rx="3" fill="url(#acc)" stroke="#6ea8fe" stroke-width="0.5"/>
+        <text x="60" y="14" text-anchor="middle" fill="#6ea8fe" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">acc2  0.4/6.5</text>
       </g>
       <g transform="translate(20, 50)">
-        <rect width="120" height="20" rx="3" fill="url(#acc)" stroke="#d4a259" stroke-width="0.5"/>
-        <text x="60" y="14" text-anchor="middle" fill="#d4a259" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">acc3  0.3/6.5 GB</text>
+        <rect width="120" height="20" rx="3" fill="url(#acc)" stroke="#6ea8fe" stroke-width="0.5"/>
+        <text x="60" y="14" text-anchor="middle" fill="#6ea8fe" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">acc3  0.3/6.5</text>
       </g>
       <g transform="translate(20, 75)">
-        <rect width="120" height="20" rx="3" fill="url(#acc)" stroke="#d4a259" stroke-width="0.5" stroke-dasharray="2 2"/>
-        <text x="60" y="14" text-anchor="middle" fill="#f87171" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">acc4  ⚠ torn</text>
+        <rect width="120" height="20" rx="3" fill="url(#acc)" stroke="#6ea8fe" stroke-width="0.5" stroke-dasharray="2 2"/>
+        <text x="60" y="14" text-anchor="middle" fill="#f5b942" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">acc4  ⚠ torn</text>
       </g>
       <g transform="translate(20, 100)">
         <rect width="120" height="20" rx="3" fill="url(#acc)" stroke="#3a3f4b" stroke-width="0.5" opacity="0.6"/>
-        <text x="60" y="14" text-anchor="middle" fill="#7e8693" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">acc5..8 idle</text>
+        <text x="60" y="14" text-anchor="middle" fill="#7e8693" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">acc5..N  idle</text>
       </g>
     </g>
-    <text x="80" y="220" text-anchor="middle" fill="#7e8693" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="10" opacity="0.7">~52 GB total</text>
+    <text x="80" y="240" text-anchor="middle" fill="#7e8693" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="10" opacity="0.7">+ many more</text>
   </g>
 
   <!-- Arrows between tiers -->
-  <line x1="200" y1="210" x2="256" y2="210" stroke="#7e8693" stroke-width="1.5" marker-end="url(#arr)"/>
-  <text x="228" y="200" text-anchor="middle" fill="#7e8693" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="9" opacity="0.8">HTTPS</text>
-  <line x1="540" y1="210" x2="596" y2="210" stroke="#7e8693" stroke-width="1.5" marker-end="url(#arr)"/>
-  <text x="568" y="200" text-anchor="middle" fill="#7e8693" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="9" opacity="0.8">HTTPS</text>
+  <line x1="200" y1="220" x2="256" y2="220" stroke="#7e8693" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="228" y="210" text-anchor="middle" fill="#7e8693" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="9" opacity="0.8">HTTPS</text>
+  <line x1="540" y1="220" x2="596" y2="220" stroke="#7e8693" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="568" y="210" text-anchor="middle" fill="#7e8693" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="9" opacity="0.8">polling</text>
 
   <!-- Storage tier underneath -->
-  <g transform="translate(40, 350)">
-    <rect x="0" y="0" width="720" height="20" rx="4" fill="#1c2230" stroke="#3a3f4b"/>
-    <text x="20" y="14" fill="#7e8693" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">/opt/stacks/sites/seedrpool/data/library.sqlite</text>
-    <text x="700" y="14" text-anchor="end" fill="#d4a259" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">node:sqlite (WAL)</text>
+  <g transform="translate(40, 380)">
+    <rect x="0" y="0" width="720" height="22" rx="4" fill="#1c2230" stroke="#3a3f4b"/>
+    <text x="20" y="15" fill="#7e8693" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">$SEEDRPOOL_DB_PATH</text>
+    <text x="700" y="15" text-anchor="end" fill="#6ea8fe" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9">node:sqlite (WAL)</text>
   </g>
 </svg>

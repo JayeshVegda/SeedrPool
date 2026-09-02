@@ -406,8 +406,10 @@ body {
 
 .signal-bar {
   display: grid;
-  /* Driven by --signal-cols which the server sets based on account count. */
-  grid-template-columns: repeat(var(--signal-cols, 8), minmax(0, 1fr));
+  /* Auto-fit: small pools get a few wide cells, large pools wrap into
+     multiple rows. The number of columns is bounded only by the
+     minmax min, not by a hardcoded count. */
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 0.5rem;
   margin-bottom: 1.25rem;
 }
@@ -1319,7 +1321,6 @@ export function layout(options: {
   activeNav?: string;
   body: string;
   activeTransfers?: number;
-  signalCols?: number;
   initialToast?: { kind: 'ok' | 'bad' | 'info' | 'warn'; title: string; detail?: string };
 }): string {
   const navHtml = NAV_ITEMS.map((n) => {
@@ -1340,8 +1341,6 @@ export function layout(options: {
          ${options.initialToast.detail ? `<span class="toast-detail">${esc(options.initialToast.detail)}</span>` : ''}
        </div>`
     : '';
-
-  const signalCols = options.signalCols ?? 8;
 
   return `<!doctype html>
 <html lang="en">
@@ -1378,7 +1377,7 @@ export function layout(options: {
       </div>
     </div>
   </aside>
-  <main class="main" style="--signal-cols: ${signalCols};">${options.body}</main>
+  <main class="main">${options.body}</main>
 </div>
 ${initialToastHtml}
 

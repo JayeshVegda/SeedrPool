@@ -9,13 +9,16 @@ the ability to **add magnets** that the Seedr app or web UI will fetch and
 expose to a single user. Useful. Limiting.
 
 The same operator with **two or more accounts** (the kind of person who has
-a personal account, a friend-shared one, and a "testing" account) is forced
+a personal account, a shared one, and a "testing" account) is forced
 into a choice: pick one, juggle Stremio addons, or manually copy the
-manifest.json URL every time. Eight accounts — the kind of person running
-SeedrPool — is unusable in Stremio out of the box.
+manifest.json URL every time. The seedr.zayu.dev deploy runs with **8
+accounts and ~52 GiB**, but the architecture itself imposes no upper
+bound — the pool is a Map of arbitrary size, the rate limiter is per
+account, and the indexer / transfer-watcher run at a fixed cadence
+regardless of pool size. 8 is a deployment choice, not a hard limit.
 
-The seedr.zayu.dev deploy is the limit case: 8 Seedr accounts, ~52 GiB
-total, one operator (Jay) and a tiny friend circle.
+The seedr.zayu.dev deploy is a working example: 8 Seedr accounts,
+~52 GiB, one operator (Jay) and a tiny friend circle.
 
 ## Constraints (verified in `RESEARCH.md`)
 
@@ -23,7 +26,7 @@ These are the hard facts the design must respect:
 
 1. **No Stremio support for multi-account pools.** The Stremio addon protocol
    is built around the assumption that one addon serves one library. There is
-   no native way to expose "8 accounts behind one URL". SeedrPool must
+   no native way to expose "N accounts behind one URL". SeedrPool must
    pretend to be a single account.
 
 2. **Each Seedr account has independent storage and quota.** Movies you add
@@ -34,8 +37,10 @@ These are the hard facts the design must respect:
 3. **Seedr's API is rate-limited and not designed for server use.** Every
    call costs against a per-account quota. The default `client_id` (`seedr_test`)
    is rate-limited to almost nothing. SeedrPool uses `client_id=seedr_chrome`
-   to get a usable budget. Even so, polling 8 accounts every 30 seconds is
-   the largest the budget can sustain.
+   to get a usable budget. The transfer-watcher polls every N seconds
+   per account, with a 250 ms token-bucket between requests. At 50 accounts
+   that's one request per N seconds × 50 — well inside Seedr's
+   per-client quota.
 
 4. **Stremio and Seedr speak different identities.** Stremio asks for `tt…`
    (IMDb). Seedr returns internal `folder_id`, `file_id`, and `transfer_id`.
@@ -85,7 +90,7 @@ the three tiers:
   to clients, speaks Seedr V1 to accounts. The middle of the diagram
   shows the four endpoints: `manifest.json`, `catalog`, `stream`,
   `meta` + `subtitles`, plus the indexer.
-* **Seedr pool** — 8 Seedr accounts, each with ~6.5 GiB. The
+* **Seedr pool** — N Seedr accounts, each with ~6.5 GiB. The
   `library.sqlite` (WAL) sits underneath the SeedrPool process, holding
   the merged index.
 

@@ -162,8 +162,9 @@ to Stremio until you fill in a key. Restart the container after editing.
 
 ## Smoke test
 
-1. Open `https://seedr.zayu.dev/admin` → credentials → 8 accounts show as
-   `healthy`.
+1. Open `https://seedr.zayu.dev/admin` → credentials → every account
+   shows as `healthy` (or as many as your pool has; there is no fixed
+   maximum).
 2. Click **Reindex**. After ~30 s the library table populates.
 3. Open Stremio → Add-ons → Community → paste the manifest URL from the
    admin overview → catalog shows your movies.

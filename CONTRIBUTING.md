@@ -1,10 +1,10 @@
 # Contributing
 
 Thanks for taking a look. SeedrPool is a single-operator tool that does
-one thing (8 Seedr accounts behind one Stremio addon) and the bug surface
+one thing (N Seedr accounts behind one Stremio addon) and the bug surface
 is small enough that the project isn't actively soliciting feature
-contributions. That said, here is the shape of the contribution I would
-be glad to see.
+contributions. The seedr.zayu.dev deploy runs 8 accounts; the
+architecture itself supports any N.
 
 ## Ground rules
 

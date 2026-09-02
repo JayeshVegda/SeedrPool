@@ -13,11 +13,10 @@
 [![Stremio](https://img.shields.io/badge/For-Stremio-7b5bf5.svg?style=flat)](https://stremio.com)
 [![Dependencies](https://img.shields.io/badge/Runtime_deps-0-22c55e.svg?style=flat)](package.json)
 
-SeedrPool makes 8 Seedr.cc accounts (~52 GiB total) behave as **one**
-Stremio library. Add a magnet once; it lands on the right account; the
-right Stremio user sees it. No torrent search, no scraping, no second
-dashboard — a focused tool for the operator who already has a Seedr
-fleet.
+SeedrPool makes **N Seedr.cc accounts behave as one** Stremio library. Add
+a magnet once; it lands on the right account; the right Stremio user
+sees it. No torrent search, no scraping, no second dashboard — a
+focused tool for the operator who already has a Seedr fleet.
 
 [**Quick start**](#quick-start) · [**How it works**](#how-it-works) · [**Architecture**](docs/ARCHITECTURE.md) · [**Install**](docs/INSTALL.md) · [**Operations**](docs/OPERATIONS.md) · [**API**](docs/API.md)
 
@@ -43,7 +42,7 @@ sees eight accounts behind the scenes.
 
 ## Features
 
-- **One addon URL, one library, eight accounts.** Add a magnet in the
+- **One addon URL, one library, N accounts.** Add a magnet in the
   operator console; it lands on the account with the most free space.
 - **Stremio deep links** on every row, ready to paste into Stremio's
   addon search.
@@ -70,16 +69,19 @@ npm install
 npm run build
 ```
 
-Create the secrets files the addon expects:
+Add one Seedr account per line of `seedrpool-credentials.txt`. There is no
+hardcoded maximum — the pool is a Map. 8 is the seedr.zayu.dev deploy,
+50 is comfortable, 100 is fine if your Seedr V1 quota holds.
+
+Set up the secrets:
 
 ```bash
 mkdir -p ../.secrets
-echo 'you@example.com:correctpassword' > ../.secrets/seedrpool-credentials.txt
-echo 'some-url-safe-string' > ../.secrets/seedrpool-addon-secret
+echo 'acc1@example.com:password1' > ../.secrets/seedrpool-credentials.txt
+echo 'acc2@example.com:password2' >> ../.secrets/seedrpool-credentials.txt
+echo 'your-addon-secret-string' > ../.secrets/seedrpool-addon-secret
 chmod 600 ../.secrets/*
 ```
-
-Edit `docker-compose.yml` to mount the secrets and data directory, then:
 
 ```bash
 cd /opt/stacks/compose/seedrpool

@@ -83,11 +83,17 @@ export class NoCapacityError extends Error {
 /**
  * Streams per account above which placement prefers a quieter account.
  *
- * A fairness heuristic, not a hard limit: measured concurrency is per signed URL
- * (2 reads, then 429), not per account, and every playback mints its own URL. The
- * value spreads bandwidth rather than preventing throttling.
+ * A fairness heuristic, not a hard cap: measured concurrency is per signed URL
+ * (2 reads, then 429), not per account, and every playback mints its own URL.
+ * The value spreads bandwidth rather than preventing throttling; the rate
+ * limiter handles real 429s.
+ *
+ * `Infinity` would disable the heuristic entirely (every account always
+ * counts as idle, even if it's actually serving 100 streams). The default is
+ * calibrated for the seedr.zayu.dev deploy but can be raised freely for bigger
+ * pools since Seedr's CDN is what actually rate-limits.
  */
-export const STREAM_LIMIT_PER_ACCOUNT = 3;
+export const STREAM_LIMIT_PER_ACCOUNT = 5;
 
 /**
  * Simultaneous range reads one signed `ff_get` URL will serve before HTTP 429.

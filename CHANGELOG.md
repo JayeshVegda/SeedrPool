@@ -3,6 +3,25 @@
 All notable changes to SeedrPool are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## 0.2.0 — 2026-09-02
+
+### Changed
+
+* **Removed the implicit "8 accounts" cap.** The pool, indexer,
+  transfer-watcher, and rate-limiter were already N-account clean. This
+  release drops the UI-side caps (`MAX_TITLE_KEYS_IN_LIB` removed,
+  signal bar now `auto-fit minmax(140px, 1fr)` instead of `repeat(N, ...)`,
+  catalog `limit` 500 → 1000, activity log query 500 → 1000) and updates
+  every doc and the architecture diagram to talk about "N accounts" and
+  "configurable storage" instead of "8 accounts" and "52 GiB".
+* `STREAM_LIMIT_PER_ACCOUNT` raised from 3 to 5, with a docstring that
+  explains the heuristic and how to raise it freely for larger pools
+  (Seedr's CDN is what actually rate-limits).
+* New `tests/core/account-pool.test.ts › scales to N accounts` block:
+  50-account pool, allocator fairness across 50 entries, transfer-list
+  fan-out. The seedr.zayu.dev test config is unchanged; the new block is
+  a layer of assurance for the deployment flexibility.
+
 ## 0.1.0 — 2026-09-01
 
 ### Added

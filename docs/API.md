@@ -31,7 +31,7 @@ can call them.
   "id": "dev.zayu.seedrpool",
   "version": "0.1.0",
   "name": "SeedrPool",
-  "description": "8 Seedr accounts → one library",
+  "description": "N Seedr accounts → one library",
   "types": ["movie", "series"],
   "resources": ["catalog", "meta", "stream", "subtitles"],
   "idPrefixes": null,

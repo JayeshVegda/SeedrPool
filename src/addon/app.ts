@@ -96,7 +96,7 @@ export class AddonApp {
     const titles = this.#store.listTitles({
       kind: type,
       ...(extra['search'] !== undefined ? { search: extra['search'] } : {}),
-      limit: 500,
+      limit: 1000,
     });
 
     // Stremio pages with `skip` rather than page numbers.
