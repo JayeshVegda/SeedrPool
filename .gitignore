@@ -1,0 +1,20 @@
+node_modules/
+dist/
+*.log
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+.env
+*.env
+
+# Seedr account credentials (email:password per line). The deployed copy lives
+# in /opt/stacks/.secrets/; this must never reach git.
+data.txt
+credentials.txt
+
+# pnpm artifacts. This project is npm-based (see Dockerfile); the lockfile
+# and workspace declaration are leftovers from an earlier experiment.
+pnpm-lock.yaml
+pnpm-workspace.yaml
