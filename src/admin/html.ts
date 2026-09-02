@@ -923,10 +923,16 @@ td.mono, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nu
   background: var(--surface-3);
   position: relative;
   overflow: hidden;
-  display: flex; align-items: center; justify-content: center;
+}
+.poster-cover img, .poster-fallback {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 .poster-cover img {
-  width: 100%; height: 100%; object-fit: cover;
+  object-fit: cover;
+  z-index: 1;
   transition: transform 0.4s var(--ease-out);
 }
 .poster-card:hover .poster-cover img { transform: scale(1.04); }
@@ -937,8 +943,8 @@ td.mono, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nu
   font-family: var(--font-mono);
   font-size: 1.5rem;
   font-weight: 700;
-  width: 100%; height: 100%;
   background: linear-gradient(135deg, #161c28 0%, #0d1117 100%);
+  z-index: 0;
 }
 .poster-fallback svg { width: 32px; height: 32px; color: var(--text-faint); }
 
@@ -1106,8 +1112,23 @@ td.mono, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nu
   overflow: hidden;
   border: 1px solid var(--border-2);
   flex-shrink: 0;
+  position: relative;
 }
-.movie-cell .poster-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.movie-cell .poster-thumb img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
+}
+.poster-thumb-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 0;
+}
 .movie-cell .meta { min-width: 0; flex: 1; }
 .movie-cell .title { font-weight: 600; color: var(--text); font-size: 0.86rem; line-height: 1.2; }
 .movie-cell .sub { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); margin-top: 0.2rem; display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
@@ -1233,22 +1254,21 @@ td.mono, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nu
   height: 180px;
   border-radius: 50%;
   background: var(--surface-3);
-  overflow: hidden;
+  display: grid;
+  place-items: center;
 }
-.donut-seg {
+.donut-ring::before {
+  content: "";
   position: absolute;
   inset: 0;
-  background: conic-gradient(
-    var(--color) var(--start),
-    var(--color) var(--end),
-    transparent var(--end)
-  );
-  mask: radial-gradient(circle, transparent 50%, black 50.5%);
-  -webkit-mask: radial-gradient(circle, transparent 50%, black 50.5%);
+  border-radius: 50%;
+  background: var(--donut-gradient, var(--surface-3));
+  mask: radial-gradient(circle, transparent 55%, black 55.5%);
+  -webkit-mask: radial-gradient(circle, transparent 55%, black 55.5%);
 }
 .donut-center {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  z-index: 1;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center;
 }
@@ -1294,7 +1314,10 @@ const ALPINE_VERSION = '3.14.8';
 
 export function scriptTags(): string {
   return `
-<script type="module" src="https://cdn.jsdelivr.net/npm/sonner-js@${SONNER_VERSION}/+esm" data-toast-loader></script>
+<script type="module">
+  import { toast } from 'https://cdn.jsdelivr.net/npm/sonner-js@${SONNER_VERSION}/+esm';
+  window.toast = toast;
+</script>
 <script src="https://cdn.jsdelivr.net/npm/htmx.org@${HTMX_VERSION}/dist/htmx.min.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/alpinejs@${ALPINE_VERSION}/dist/cdn.min.js" defer></script>
 `.trim();

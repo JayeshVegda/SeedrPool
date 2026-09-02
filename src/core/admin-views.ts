@@ -174,7 +174,7 @@ export class AdminViews {
       ageDays:
         lastSeenAt === null
           ? null
-          : Math.max(0, Math.floor((Date.now() - Math.floor(lastSeenAt / 1000)) / 86_400_000)),
+          : Math.max(0, Math.floor((Date.now() - lastSeenAt) / 86_400_000)),
     };
   }
 

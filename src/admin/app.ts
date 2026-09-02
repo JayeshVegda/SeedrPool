@@ -327,7 +327,7 @@ export class AdminApp {
       return `<tr>
         <td>
           <div class="movie-cell">
-            <div class="poster-thumb">${poster ? `<img src="${poster}" alt="" onerror="this.onerror=null; this.parentElement.textContent='${initial}';">` : initial}</div>
+            <div class="poster-thumb"><span class="poster-thumb-fallback">${initial}</span>${poster ? `<img src="${poster}" alt="" onerror="this.remove();">` : ''}</div>
             <div class="meta">
               <div class="title">${esc(t.name)}</div>
               <div class="sub">
@@ -462,7 +462,7 @@ export class AdminApp {
         <div class="actions">
           <button class="btn" hx-post="/admin/api/reindex" hx-swap="none">${icon('refresh-cw', { size: 13 })} Reindex</button>
           <button class="btn" hx-post="/admin/api/enrich-all" hx-swap="none">${icon('search', { size: 13 })} Re-fetch all metadata</button>
-          <button class="btn" hx-post="/admin/api/clear-metadata" hx-swap="none"
+          <button class="btn" type="button"
             x-data
             x-on:click="window.dispatchEvent(new CustomEvent('seedrpool:confirm', { detail: { verb: 'Reset', body: 'Clear IMDb and TMDB ids for every title. The enricher will re-fetch them on the next tick.', action: 'clear-metadata' } }))">${icon('rotate-ccw', { size: 13 })} Reset all metadata</button>
           <a class="btn" href="/admin">${icon('arrow-left', { size: 13 })} Overview</a>
@@ -726,7 +726,7 @@ export class AdminApp {
         <div class="section-head"><h2>${icon('database', { size: 12 })} Source</h2></div>
         <div class="card">
           <p class="muted" style="font-size:0.85rem; line-height: 1.5;">
-            Accounts load from <code>${esc(this.#config.credentialsPath)}</code> — one <code>email:password</code> per line.
+            Accounts load from your configured credentials file — one <code>email:password</code> per line.
             Line 1 → <code>acc1</code>, line 2 → <code>acc2</code>. <strong>Append</strong> at the bottom; never renumber.
             The Add account modal writes a new line; the Reload button re-reads the file.
           </p>
@@ -899,7 +899,7 @@ export class AdminApp {
       entries = await readdir(this.#config.dumpsDir, { withFileTypes: true });
     } catch {
       return this.#page('Dumps', '/admin/dumps', html`
-        <div class="empty"><h3>Dumps directory not found</h3><p>${esc(this.#config.dumpsDir)}</p></div>
+        <div class="empty"><h3>Dumps directory not found</h3><p>Ensure the dump path is configured and writable.</p></div>
       `);
     }
     const latestByAccount = new Map<string, { name: string; size: number; mtime: number }>();
@@ -1130,8 +1130,9 @@ export class AdminApp {
       ? `<button class="btn btn-sm" hx-post="/admin/api/move" hx-vals='{"accountId":"${esc(primaryFile.accountId)}","fileId":"${esc(primaryFile.fileId)}"}' hx-swap="none">${icon('arrow-right-left', { size: 12 })} Move</button>`
       : '';
 
+    const streamUrl = `${this.#config.publicUrl}/${this.#config.addonSecret}/play/${primaryFile?.accountId ?? ''}/${primaryFile?.fileId ?? ''}`;
     const copyLink = primaryFile
-      ? `<button class="btn btn-sm" type="button" onclick="copyText(this, '/${esc(this.#config.addonSecret)}/play/${esc(primaryFile.accountId)}/${esc(primaryFile.fileId)}')">${icon('link', { size: 12 })} Copy</button>`
+      ? `<button class="btn btn-sm" type="button" onclick="copyText(this, '${esc(streamUrl)}')">${icon('link', { size: 12 })} Copy</button>`
       : '';
 
     const download = primaryFile
@@ -1145,9 +1146,8 @@ export class AdminApp {
     return `
       <div class="poster-card ${allTorn ? 'torn' : ''} ${categories}" data-category="${categories}">
         <div class="poster-cover">
-          ${posterUrl
-            ? `<img src="${posterUrl}" alt="${esc(t.name)}" loading="lazy" onerror="this.onerror=null; this.parentElement.innerHTML='<div class=&quot;poster-fallback&quot;>${icon('film', { size: 32 })}<span>${esc(t.name.slice(0, 2).toUpperCase())}</span></div>';" />`
-            : `<div class="poster-fallback">${icon(t.kind === 'series' ? 'tv' : 'film', { size: 32 })}<span>${esc(t.name.slice(0, 2).toUpperCase())}</span></div>`}
+          <div class="poster-fallback">${icon(t.kind === 'series' ? 'tv' : 'film', { size: 32 })}<span>${esc(t.name.slice(0, 2).toUpperCase())}</span></div>
+          ${posterUrl ? `<img src="${posterUrl}" alt="${esc(t.name)}" loading="lazy" onerror="this.remove();" />` : ''}
           <div class="poster-badges">
             ${raw(resBadge)}
             ${raw(playState)}
@@ -1201,8 +1201,9 @@ export class AdminApp {
     const moveAction = movable && primaryFile
       ? `<button class="btn btn-sm" hx-post="/admin/api/move" hx-vals='{"accountId":"${esc(primaryFile.accountId)}","fileId":"${esc(primaryFile.fileId)}"}' hx-swap="none">${icon('arrow-right-left', { size: 12 })} Move</button>`
       : '';
+    const streamUrl = `${this.#config.publicUrl}/${this.#config.addonSecret}/play/${primaryFile?.accountId ?? ''}/${primaryFile?.fileId ?? ''}`;
     const copyLink = primaryFile
-      ? `<button class="btn btn-sm" type="button" onclick="copyText(this, '/${esc(this.#config.addonSecret)}/play/${esc(primaryFile.accountId)}/${esc(primaryFile.fileId)}')">${icon('link', { size: 12 })} Copy</button>`
+      ? `<button class="btn btn-sm" type="button" onclick="copyText(this, '${esc(streamUrl)}')">${icon('link', { size: 12 })} Copy</button>`
       : '';
     const stremioLink = t.imdbId
       ? `<a class="btn btn-sm primary" href="stremio:///detail/${t.kind === 'series' ? 'series' : 'movie'}/${esc(t.imdbId)}" target="_blank" rel="noreferrer">${icon('play', { size: 12 })} Stremio</a>`
@@ -1227,7 +1228,7 @@ export class AdminApp {
     return `<tr class="${trClass} ${categories}" data-category="${categories}">
       <td>
         <div class="movie-cell">
-          <div class="poster-thumb">${poster ? `<img src="${poster}" alt="" onerror="this.onerror=null; this.parentElement.textContent='${initial}';">` : initial}</div>
+          <div class="poster-thumb"><span class="poster-thumb-fallback">${initial}</span>${poster ? `<img src="${poster}" alt="" onerror="this.remove();">` : ''}</div>
           <div class="meta">
             <div class="title">${esc(t.name)}</div>
             <div class="sub">
@@ -1264,20 +1265,29 @@ export class AdminApp {
     const palette = ['#6ea8fe', '#818cf8', '#a78bfa', '#c084fc', '#f472b6', '#fb7185', '#34d399', '#4ade80', '#67e8f9', '#facc15'];
     const freeEntry = breakdown[breakdown.length - 1];
     const accounts = breakdown.slice(0, -1);
+    const freeColor = 'rgba(255,255,255,0.08)';
+
     let acc = 0;
-    const segments = accounts.map((a, i) => {
+    const stops: string[] = [];
+    for (let i = 0; i < accounts.length; i++) {
+      const a = accounts[i]!;
       const angle = (a.valueGib / total) * 360;
       const start = acc;
       const end = acc + angle;
       acc = end;
       const color = palette[i % palette.length] ?? '#6ea8fe';
-      return `<div class="donut-seg" style="--start:${start}deg; --end:${end}deg; --color:${color};"></div>`;
-    }).join('');
-    const freeColor = 'rgba(255,255,255,0.06)';
+      if (angle > 0.01) {
+        stops.push(`${color} ${start.toFixed(2)}deg ${end.toFixed(2)}deg`);
+      }
+    }
+    if (acc < 359.99) {
+      stops.push(`${freeColor} ${acc.toFixed(2)}deg 360deg`);
+    }
+    const conic = stops.length > 0 ? stops.join(', ') : `${freeColor} 0deg 360deg`;
+
     return `
       <div class="donut">
-        <div class="donut-ring">
-          ${segments}
+        <div class="donut-ring" style="--donut-gradient: conic-gradient(${conic});">
           <div class="donut-center">
             <div class="donut-value">${total.toFixed(1)} <span class="muted">GiB</span></div>
             <div class="donut-label">across ${accounts.length} nodes</div>

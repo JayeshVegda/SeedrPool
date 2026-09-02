@@ -86,8 +86,21 @@
   // -------------------------------------------------------------------
   // htmx behaviour.
   // -------------------------------------------------------------------
+  function findTargetButton(e) {
+    if (!e || !e.target) return null;
+    if (e.target.matches && e.target.matches('button, .btn')) return e.target;
+    if (e.target.closest) {
+      const b = e.target.closest('button, .btn');
+      if (b) return b;
+    }
+    if (e.target.querySelector) {
+      return e.target.querySelector('button[type=submit], .btn.primary, .btn');
+    }
+    return null;
+  }
+
   document.addEventListener('htmx:beforeRequest', (e) => {
-    const btn = e.target.closest('button[type=submit], .btn');
+    const btn = findTargetButton(e);
     if (btn) {
       btn.dataset.orig = btn.dataset.orig || btn.innerHTML;
       btn.disabled = true;
@@ -96,7 +109,7 @@
   });
 
   document.addEventListener('htmx:afterRequest', (e) => {
-    const btn = e.target.closest('button[type=submit], .btn');
+    const btn = findTargetButton(e);
     if (btn && btn.dataset.orig) {
       btn.disabled = false;
       btn.innerHTML = btn.dataset.orig;
@@ -127,6 +140,15 @@
         if (data.failures && data.failures.length > 0) {
           for (const f of data.failures) showToast('bad', 'Ingest failed', f.error);
         }
+        // Reset form and refresh table after ingest
+        if (e.target && e.target.tagName === 'FORM') {
+          try { e.target.reset(); } catch (_) {}
+        }
+        setTimeout(() => {
+          if (window.location.pathname === '/admin' || window.location.pathname === '/admin/transfers') {
+            window.location.reload();
+          }
+        }, 1200);
       } else if (data.accountId) {
         // Account CRUD.
         const verb = e.target.dataset.toastVerb || 'Done';
@@ -321,6 +343,7 @@
     delete:           { url: '/admin/api/account/delete', fields: ['accountId'] },
     'file-delete':    { url: '/admin/api/file/delete',    fields: ['accountId', 'fileId'] },
     'clear-metadata': { url: '/admin/api/clear-metadata', fields: [] },
+    'transfer-delete':{ url: '/admin/api/transfer/delete',fields: ['accountId', 'transferId'] },
   };
 
   window.runConfirmedAction = function (detail) {
@@ -348,6 +371,8 @@
             showToast('ok', 'Metadata reset', `${d.cleared} titles will be re-fetched`);
           } else if (d.fileId) {
             showToast('ok', 'File deleted', `${d.accountId} / ${d.fileId}`);
+          } else if (d.transferId) {
+            showToast('ok', 'Transfer removed', `${d.accountId} / ${d.transferId}`);
           } else {
             showToast('ok', 'Done');
           }
@@ -378,5 +403,13 @@
   document.body && document.body.addEventListener('seedrpool:toast', (e) => {
     const d = e.detail || {};
     showToast(d.kind || 'info', d.title || 'Done', d.detail);
+  });
+
+  window.addEventListener('seedrpool:reload-partial', () => {
+    setTimeout(() => {
+      if (window.location.pathname === '/admin' || window.location.pathname === '/admin/transfers') {
+        window.location.reload();
+      }
+    }, 1200);
   });
 })();
