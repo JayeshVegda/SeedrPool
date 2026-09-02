@@ -18,6 +18,7 @@ import { MetadataEnricher } from './library/metadata-enricher.ts';
 import { TmdbClient } from './library/tmdb.ts';
 import { AddonApp } from './addon/app.ts';
 import { TransferWatcher } from './core/transfer-watcher.ts';
+import { Dumper } from './core/dumper.ts';
 
 const config = await loadConfig();
 
@@ -82,9 +83,40 @@ async function rebuildPool(): Promise<void> {
   void indexer.scanAll();
 }
 
-const admin = new AdminApp(() => pool, config, credentials, rebuildPool, library, indexer, enricher);
+const admin = new AdminApp(
+  () => pool, config, credentials, rebuildPool, library, indexer, enricher,
+  () => dumper.dump(pool).then((r) => r),
+);
 
 const addonPath = `/${config.addonSecret}`;
+
+// Periodic per-account JSON dumper. Each run writes one file per account
+// to `data/dumps/<accountId>.<unixMs>.json`; the Dumper prunes the
+// rest. Operators can read the latest dump via `cat data/dumps/acc1.*.json`
+// without hitting Seedr.
+const dumper = new Dumper({ directory: config.dumpsDir });
+const DUMP_INTERVAL_MS = 6 * 60 * 60_000; // 6h
+async function runDump(): Promise<{ written: string[]; errors: string[] }> {
+  try {
+    const { written, errors } = await dumper.dump(pool);
+    if (written.length > 0) {
+      console.log(
+        `dump: wrote ${written.length} file${written.length === 1 ? '' : 's'}` +
+        (errors.length > 0 ? `, ${errors.length} error${errors.length === 1 ? '' : 's'}` : ''),
+      );
+    }
+    if (errors.length > 0) {
+      for (const e of errors) console.warn(`dump: ${e}`);
+    }
+    return { written, errors };
+  } catch (err) {
+    console.warn('dump: failed:', err instanceof Error ? err.message : err);
+    return { written: [], errors: [err instanceof Error ? err.message : String(err)] };
+  }
+}
+await runDump();
+const dumpTimer = setInterval(() => { void runDump(); }, DUMP_INTERVAL_MS);
+dumpTimer.unref();
 
 const router = new Router()
   .get('/', () => redirect('/admin'))
@@ -100,6 +132,10 @@ const router = new Router()
   .post('/admin/transfers/delete', (ctx) => admin.deleteTransfer(ctx))
   .get('/admin/activity', (ctx) => admin.activity(ctx))
   .post('/admin/file/delete', (ctx) => admin.deleteFile(ctx))
+  .post('/admin/file/url', (ctx) => addon.fileUrl(ctx))
+  .get('/admin/file/download', (ctx) => addon.fileDownload(ctx))
+  .post('/admin/dump', () => admin.dumpNow(runDump))
+  .get('/admin/dumps', () => admin.dumps())
   .post('/admin/magnet', (ctx) => admin.addMagnet(ctx))
   .post('/admin/reindex', () => admin.reindex())
   .post('/admin/readd', (ctx) => admin.reAddMagnet(ctx))
@@ -223,6 +259,7 @@ server.listen(config.port, config.host, () => {
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
     console.log(`\n${signal} received, closing`);
+    clearInterval(dumpTimer);
     watcher.stop();
     server.close(() => {
       library.close();

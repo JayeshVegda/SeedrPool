@@ -89,6 +89,27 @@ interface CachedToken {
   expiresIn: number;
 }
 
+/**
+ * Structured snapshot of an account. The token field holds a short prefix
+ * and suffix only — never the full access token. `null` when the provider
+ * has not yet logged in (e.g. just added to the pool, first probe pending).
+ */
+export interface AccountDump {
+  accountId: string;
+  email: string;
+  capturedAt: number;
+  token: { issuedAt: number; expiresIn: number; prefix: string; suffix: string } | null;
+  quota: { used: number; max: number; free: number };
+  root: {
+    folders: Array<{ id: string; name: string; size: number }>;
+    files: Array<{ id: string; name: string; size: number; folderId: string }>;
+  };
+  transfers: Array<{
+    id: string; name: string | null; state: string; progress: number;
+    size: number; seeders: number; leechers: number; error: string | null;
+  }>;
+}
+
 export class SeedrV1Provider implements StorageProvider {
   readonly accountId: string;
   readonly email: string;
@@ -274,6 +295,51 @@ export class SeedrV1Provider implements StorageProvider {
       }
       return { healthy: false, reason: err instanceof Error ? err.message : String(err) };
     }
+  }
+
+  /**
+   * Captures a structured snapshot of the account: identity, current
+   * token (masked), quota, root folder contents, in-flight transfers.
+   *
+   * The intent is the operator can `cat data/dumps/acc1.json` to
+   * inspect what's happening with an account without hitting Seedr
+   * every time. Used by the periodic dumper in `src/index.ts` and
+   * the operator console's "dump" button.
+   *
+   * The access token is **never** written in full. The dump stores a
+   * short prefix and suffix plus a flag so a re-issued token is
+   * distinguishable in the file without leaking the secret.
+   */
+  async dumpAccount(): Promise<AccountDump> {
+    // The token cache is local to the provider instance. We materialize
+    // it before the API calls below so a 401-then-relogin does not
+    // rewrite the timestamp between snapshots.
+    await this.#accessToken();
+    const cached = this.#token;
+    const tokenDisplay = cached
+      ? { issuedAt: cached.issuedAt, expiresIn: cached.expiresIn, prefix: cached.accessToken.slice(0, 6), suffix: cached.accessToken.slice(-4) }
+      : null;
+
+    const [quota, root, transfers] = await Promise.all([
+      this.getQuota().catch((err) => ({ used: 0, max: 0, get free() { return 0; }, error: err instanceof Error ? err.message : String(err) } as never)),
+      this.listFolder(null).catch((err) => ({ folders: [], files: [], error: err instanceof Error ? err.message : String(err) } as never)),
+      this.listTransfers().catch(() => []),
+    ]);
+
+    return {
+      accountId: this.accountId,
+      email: this.email,
+      capturedAt: Date.now(),
+      token: tokenDisplay,
+      quota: { used: quota.used, max: quota.max, free: quota.free },
+      root: {
+        folders: root.folders.map((f) => ({ id: f.id, name: f.name ?? f.path, size: f.size })),
+        files: root.files.map((f) => ({ id: f.id, name: f.name, size: f.size, folderId: f.folderId })),
+      },
+      transfers: transfers.map((t) => ({
+        id: t.id, name: t.name, state: t.state, progress: t.progress, size: t.size, seeders: t.seeders, leechers: t.leechers, error: t.error,
+      })),
+    };
   }
 
   /** V1 deletes files, folders, and torrents through one endpoint. */

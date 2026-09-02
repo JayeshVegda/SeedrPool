@@ -37,6 +37,12 @@ export class AdminApp {
   #library: LibraryStore;
   #indexer: Indexer;
   #enricher: MetadataEnricher;
+  /**
+   * Periodic dumper callback. Set by the entrypoint after construction so
+   * AdminApp can ask the entrypoint to run a fresh dump on demand without
+   * importing the dumper itself.
+   */
+  #runDump: () => Promise<{ written: string[]; errors: string[] }> = async () => ({ written: [], errors: [] });
 
   constructor(
     getPool: () => AccountPool,
@@ -46,6 +52,7 @@ export class AdminApp {
     library: LibraryStore,
     indexer: Indexer,
     enricher: MetadataEnricher,
+    runDump?: () => Promise<{ written: string[]; errors: string[] }>,
   ) {
     this.#getPool = getPool;
     this.#config = config;
@@ -54,6 +61,7 @@ export class AdminApp {
     this.#library = library;
     this.#indexer = indexer;
     this.#enricher = enricher;
+    if (runDump !== undefined) this.#runDump = runDump;
   }
 
   get #pool(): AccountPool {
@@ -70,6 +78,7 @@ export class AdminApp {
     const statuses = await this.#pool.refresh();
     const capacity = this.#pool.capacity();
     const stats = this.#library.stats();
+    const allTitles = this.#library.listTitles();
     const activity = this.#library.recentActivity(RECENT_ACTIVITY);
     const manifestUrl = `${this.#config.publicUrl}/${this.#config.addonSecret}/manifest.json`;
     const stremioDeepLink = `stremio://${manifestUrl.replace(/^https?:\/\//, '')}`;
@@ -86,6 +95,30 @@ export class AdminApp {
 
     const cdnBrokenCount = statuses.filter((s) => s.cdnHealthy === false).length;
     const offlineCount = statuses.filter((s) => !s.healthy).length;
+    const poolFillRatio = capacity.max > 0 ? capacity.used / capacity.max : 0;
+
+    // Quality breakdown counts for Chart.js
+    const uhdCount = allTitles.filter((t) => t.bestResolution && t.bestResolution >= 2160).length;
+    const fhdCount = allTitles.filter((t) => t.bestResolution && t.bestResolution >= 1080 && t.bestResolution < 2160).length;
+    const hdCount = allTitles.filter((t) => t.bestResolution && t.bestResolution >= 720 && t.bestResolution < 1080).length;
+    const sdCount = allTitles.filter((t) => !t.bestResolution || t.bestResolution < 720).length;
+
+    // Chart.js JSON payloads
+    const storageChartData = JSON.stringify({
+      labels: [...statuses.map((s) => s.accountId), 'Free Space'],
+      values: [
+        ...statuses.map((s) => (s.quota ? Number((s.quota.used / (1024 * 1024 * 1024)).toFixed(2)) : 0)),
+        Number((capacity.free / (1024 * 1024 * 1024)).toFixed(2)),
+      ],
+      colors: [
+        '#38bdf8', '#818cf8', '#a78bfa', '#c084fc', '#f472b6', '#fb7185', '#34d399', '#4ade80', '#232a3a'
+      ]
+    });
+
+    const qualityChartData = JSON.stringify({
+      labels: ['4K UHD', '1080p FHD', '720p HD', 'SD / Other'],
+      values: [uhdCount, fhdCount, hdCount, sdCount],
+    });
 
     const signalCells = statuses
       .map((s) => {
@@ -97,12 +130,12 @@ export class AdminApp {
         const stateLabel = s.cdnHealthy === false
           ? 'Torn reel'
           : s.healthy
-            ? s.activeStreams > 0 ? 'Streaming' : 'Ready'
+            ? s.activeStreams > 0 ? `${s.activeStreams} streaming` : 'Ready'
             : 'Offline';
         return `
           <div class="signal-cell ${cls}">
             <div class="id">${esc(s.accountId)}</div>
-            <div class="state"><i data-lucide="${s.cdnHealthy === false ? 'alert-triangle' : s.healthy ? 'circle-check' : 'circle-x'}"></i> ${esc(stateLabel)}</div>
+            <div class="state"><span class="dot"></span> ${esc(stateLabel)}</div>
             <div class="meter"><div class="fill" style="--fill: ${(fillPct / 100).toFixed(4)}"></div></div>
             <div class="bytes">${
               s.quota
@@ -121,8 +154,8 @@ export class AdminApp {
           ? '<span class="pill bad"><span class="dot"></span>No seeders</span>'
           : `<span class="pill warn"><span class="dot"></span>${esc(t.state)}</span>`;
         return `<tr>
-          <td class="mono">${esc(t.accountId)}</td>
-          <td>${esc(t.name ?? '(resolving…)')}</td>
+          <td class="mono" style="font-weight:600; color:var(--accent);">${esc(t.accountId)}</td>
+          <td style="font-weight:500;">${esc(t.name ?? '(resolving…)')}</td>
           <td>${pill}</td>
           <td>
             <div class="bar-inline">
@@ -138,102 +171,152 @@ export class AdminApp {
     const body = html`
       <div class="page-head">
         <div class="lead">
-          <div class="eyebrow">Operator</div>
-          <h1>Now <span class="accent">Reeling</span> <span class="num">· ${statuses.length} accounts · ${formatBytes(capacity.used)} on reel</span></h1>
+          <div class="eyebrow"><i data-lucide="radio"></i> Operator Console</div>
+          <h1>Command Deck <span class="num">· ${statuses.length} nodes · ${formatBytes(capacity.used)} allocated</span></h1>
           <p class="lede">
             ${cdnBrokenCount > 0
-              ? html`<strong>${cdnBrokenCount} account${cdnBrokenCount === 1 ? '' : 's'} on a torn reel</strong> — the pool is routing around ${cdnBrokenCount === 1 ? 'it' : 'them'}. Existing files still play via HLS fallback.`
-              : html`All reels intact. New magnets will land on the account with the most free space.`}
+              ? html`<strong style="color:var(--warn);">${cdnBrokenCount} account${cdnBrokenCount === 1 ? '' : 's'} on a torn reel</strong> — pool is routing around broken CDN downloads. Existing files play via HLS fallback.`
+              : html`All reels intact and healthy. Magnets are automatically routed to the node with the highest headroom.`}
             ${offlineCount > 0
               ? html` <strong style="color:var(--bad);">${offlineCount} offline.</strong>`
               : ''}
           </p>
         </div>
         <div class="actions">
-          <form class="inline" method="post" action="/admin/magnet" data-inline style="display:inline;" id="ingestForm">
-            <label class="field" style="margin:0;">
-              <span>Add magnet</span>
-              <textarea name="magnet" rows="2" placeholder="magnet:?xt=urn:btih:…" required style="min-height: 4.5rem;"></textarea>
-            </label>
-            <div style="display:flex; gap:0.4rem; margin-top: 0.55rem;">
-              <button class="primary" type="submit"><i data-lucide="plus"></i> Ingest</button>
-              <button class="btn" type="button" onclick="navigator.clipboard.readText().then(t=>{document.querySelector('textarea[name=magnet]').value=t}).catch(()=>{})"><i data-lucide="clipboard-paste"></i> Paste</button>
-            </div>
+          <form class="inline" method="post" action="/admin/accounts/reload" data-inline style="display:inline;">
+            <button class="btn" type="submit"><i data-lucide="refresh-cw"></i> Re-probe fleet</button>
+          </form>
+          <form class="inline" method="post" action="/admin/reindex" data-inline style="display:inline;">
+            <button class="btn" type="submit"><i data-lucide="database"></i> Reindex</button>
           </form>
         </div>
       </div>
 
+      <!-- Master Headroom Bar -->
+      <div class="headroom-card" style="margin-bottom: 1.25rem;">
+        <div class="headroom-header">
+          <div class="headroom-title"><i data-lucide="hard-drive"></i> Master Pool Storage Headroom</div>
+          <div class="headroom-stats">
+            <strong>${formatBytes(capacity.free)}</strong> free of <strong>${formatBytes(capacity.max)}</strong> (${(poolFillRatio * 100).toFixed(0)}% used)
+          </div>
+        </div>
+        <div class="headroom-meter">
+          <div class="headroom-fill${poolFillRatio > 0.85 ? ' warn' : ''}" style="--fill: ${poolFillRatio.toFixed(4)}"></div>
+        </div>
+        <div class="headroom-meta">
+          <span>${statuses.length - offlineCount} / ${statuses.length} nodes online</span>
+          <span>${activeTransfers} transfer${activeTransfers === 1 ? '' : 's'} in progress</span>
+        </div>
+      </div>
+
+      <!-- 12-Column Bento Grid -->
+      <div class="bento-grid">
+        <!-- Quick Magnet Ingest Deck (Col 7) -->
+        <div class="card col-7">
+          <div class="card-head">
+            <div class="card-title"><i data-lucide="plus-circle"></i> Quick Ingest Deck</div>
+            <span class="pill muted">Auto-routed</span>
+          </div>
+          <form method="post" action="/admin/magnet" data-inline id="ingestForm">
+            <div style="margin-bottom: 0.75rem;">
+              <textarea name="magnet" rows="2" placeholder="Paste magnet URI (magnet:?xt=urn:btih:…) or hash…" required style="min-height: 4.8rem;"></textarea>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; gap: 0.5rem; flex-wrap:wrap;">
+              <span class="muted" style="font-size: 0.75rem;">Routes automatically to node with max headroom.</span>
+              <div style="display:flex; gap: 0.4rem;">
+                <button class="btn" type="button" onclick="navigator.clipboard.readText().then(t=>{var ta=document.querySelector('textarea[name=magnet]'); if(ta){ta.value=t; ta.focus();}}).catch(()=>{})"><i data-lucide="clipboard-paste"></i> Paste</button>
+                <button class="primary" type="submit"><i data-lucide="arrow-down-circle"></i> Ingest Magnet</button>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <!-- Stremio Integration Hub (Col 5) -->
+        <div class="card col-5">
+          <div class="card-head">
+            <div class="card-title"><i data-lucide="tv"></i> Stremio Addon</div>
+            <span class="pill ok live"><span class="dot"></span>Live</span>
+          </div>
+          <p class="muted" style="font-size: 0.8rem; margin-bottom: 0.75rem; line-height: 1.5;">
+            Personal addon endpoint. Install into Stremio on Android, TV, iOS, or Desktop.
+          </p>
+          <div class="input-group" style="margin-bottom: 0.65rem;">
+            <input type="text" readonly value="${esc(manifestUrl)}" onclick="this.select()" />
+            <button class="btn" type="button" onclick="copyText(this, '${esc(manifestUrl)}')"><i data-lucide="copy"></i> Copy</button>
+          </div>
+          <div style="display:flex; justify-content:flex-end;">
+            <a class="btn primary btn-sm" href="${esc(stremioDeepLink)}" target="_blank" rel="noreferrer"><i data-lucide="external-link"></i> Open in Stremio</a>
+          </div>
+        </div>
+
+        <!-- 4 KPI Telemetry Cards -->
+        <div class="kpi col-3">
+          <div class="label"><i data-lucide="film"></i> Movies</div>
+          <div class="value">${stats.titles}</div>
+          <div class="sub">${stats.needsLookup > 0 ? html`<strong style="color:var(--warn);">${stats.needsLookup} need metadata</strong>` : 'All matched & enriched'}</div>
+        </div>
+
+        <div class="kpi col-3">
+          <div class="label"><i data-lucide="video"></i> Files & Tracks</div>
+          <div class="value">${stats.files}</div>
+          <div class="sub">${stats.subtitles} subtitle${stats.subtitles === 1 ? '' : 's'} indexed</div>
+        </div>
+
+        <div class="kpi col-3">
+          <div class="label"><i data-lucide="arrow-down-up"></i> Transfers</div>
+          <div class="value">${activeTransfers}</div>
+          <div class="sub">${transferList.length} total active / queued</div>
+        </div>
+
+        <div class="kpi col-3">
+          <div class="label"><i data-lucide="server"></i> Fleet Health</div>
+          <div class="value">${statuses.length - offlineCount} <span style="font-size:0.9rem; font-weight:400; color:var(--text-dim);">/ ${statuses.length}</span></div>
+          <div class="sub">${cdnBrokenCount > 0 ? html`<strong style="color:var(--warn);">${cdnBrokenCount} degraded</strong>` : '100% operational'}</div>
+        </div>
+
+        <!-- Visual Telemetry: Storage Distribution Chart (Col 6) -->
+        <div class="card col-6">
+          <div class="card-head">
+            <div class="card-title"><i data-lucide="pie-chart"></i> Node Space Distribution</div>
+            <span class="pill muted">Live GiB</span>
+          </div>
+          <div style="position:relative; height: 180px; display:flex; justify-content:center; align-items:center;">
+            <canvas id="storageDonutChart" data-chart="${esc(storageChartData)}"></canvas>
+          </div>
+        </div>
+
+        <!-- Visual Telemetry: Quality Breakdown Bar Chart (Col 6) -->
+        <div class="card col-6">
+          <div class="card-head">
+            <div class="card-title"><i data-lucide="bar-chart-3"></i> Media Quality Breakdown</div>
+            <span class="pill purple">${uhdCount} 4K UHD</span>
+          </div>
+          <div style="position:relative; height: 180px;">
+            <canvas id="qualityBarChart" data-chart="${esc(qualityChartData)}"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fleet Signal Grid -->
       <div class="section">
         <div class="section-head">
-          <h2><i data-lucide="activity"></i> Fleet signal <span class="count">${statuses.length - offlineCount} / ${statuses.length} healthy</span></h2>
+          <h2><i data-lucide="server"></i> Fleet Nodes <span class="count">${statuses.length} accounts</span></h2>
           <a class="btn btn-sm" href="/admin/accounts" data-nav>Manage accounts →</a>
         </div>
         <div class="signal-bar">${raw(signalCells)}</div>
       </div>
 
-      <div class="card-row cols-3">
-        <div class="kpi">
-          <div class="label">Movies</div>
-          <div class="value">${stats.titles}</div>
-          <div class="sub">${
-            stats.needsLookup > 0
-              ? html`<strong style="color:var(--warn);">${stats.needsLookup} need metadata</strong>`
-              : html`<strong>All matched</strong>`
-          }</div>
-        </div>
-        <div class="kpi">
-          <div class="label">Files</div>
-          <div class="value">${stats.files}</div>
-          <div class="sub">${stats.subtitles} subtitle${stats.subtitles === 1 ? '' : 's'}</div>
-        </div>
-        <div class="kpi">
-          <div class="label">Free space</div>
-          <div class="value">${formatBytes(capacity.free)}</div>
-          <div class="sub">of <strong>${formatBytes(capacity.max)}</strong></div>
-        </div>
-      </div>
-
-      <div class="card-row cols-2">
-        <div class="card">
-          <div class="section-head" style="margin-bottom: 0.65rem;">
-            <h2>Stremio addon URL</h2>
-            <span class="pill ok live"><span class="dot"></span>Live</span>
-          </div>
-          <p class="muted" style="font-size: 0.82rem; margin-bottom: 0.65rem;">
-            One URL per install. Share only with people you trust.
-          </p>
-          <div class="input-group">
-            <input type="text" readonly value="${esc(manifestUrl)}" onclick="this.select()" />
-            <button class="btn" type="button" onclick="copyText(this, '${esc(manifestUrl)}')"><i data-lucide="copy"></i> Copy</button>
-            <a class="btn primary" href="${esc(stremioDeepLink)}" target="_blank" rel="noreferrer"><i data-lucide="external-link"></i> Open</a>
-          </div>
-        </div>
-        <div class="card">
-          <div class="section-head" style="margin-bottom: 0.65rem;">
-            <h2>Shortcuts</h2>
-          </div>
-          <p class="muted" style="font-size: 0.84rem; line-height: 1.6;">
-            <kbd>R</kbd> reindex ·
-            <kbd>G</kbd> library ·
-            <kbd>T</kbd> transfers ·
-            <kbd>A</kbd> fleet ·
-            <kbd>H</kbd> home ·
-            <kbd>Y</kbd> activity ·
-            <kbd>?</kbd> this
-          </p>
-        </div>
-      </div>
-
+      <!-- In Flight Transfers -->
       <div class="section">
         <div class="section-head">
-          <h2><i data-lucide="arrow-down-up"></i> In flight <span class="count">${activeTransfers} active</span></h2>
+          <h2><i data-lucide="arrow-down-up"></i> In Flight Transfers <span class="count">${activeTransfers} active</span></h2>
           <a class="btn btn-sm" href="/admin/transfers" data-nav>All transfers →</a>
         </div>
         ${activeTransfers === 0
           ? raw(html`
-              <div class="empty">
+              <div class="empty" style="padding: 2.5rem 1.5rem;">
                 <h3>No active transfers</h3>
-                <p>Add a magnet above to start one. The pool picks the account with the most free space.</p>
+                <p>Add a magnet to queue a download. The engine will allocate the account with the most headroom.</p>
               </div>
             `)
           : raw(html`
@@ -248,20 +331,21 @@ export class AdminApp {
             `)}
       </div>
 
+      <!-- Activity Timeline -->
       <div class="section">
         <div class="section-head">
-          <h2><i data-lucide="history"></i> Activity <span class="count">last ${activity.length}</span></h2>
-          <a class="btn btn-sm" href="/admin/activity" data-nav>Full history →</a>
+          <h2><i data-lucide="activity"></i> Recent Activity <span class="count">last ${activity.length} events</span></h2>
+          <a class="btn btn-sm" href="/admin/activity" data-nav>Full log →</a>
         </div>
         ${activity.length === 0
           ? raw(html`
-              <div class="empty">
+              <div class="empty" style="padding: 2rem 1.5rem;">
                 <h3>No events yet</h3>
-                <p>The booth timeline fills up as magnets land, transfers finish, and the pool rebalances.</p>
+                <p>Activity timeline fills automatically as transfers complete and the pool rebalances.</p>
               </div>
             `)
           : raw(html`
-              <div class="card">
+              <div class="card" style="padding: 0.85rem 1rem;">
                 <ul class="timeline">
                   ${raw(
                     activity
@@ -282,81 +366,113 @@ export class AdminApp {
         title: 'Overview',
         activeNav: '/admin',
         activeTransfers,
-        // grid auto-fits in CSS; no per-page signalCols needed
         body,
       }),
     );
   }
 
-  // ---------- Library (movie only, with TMDB art) ----------
+  // ---------- Library ----------
 
   async library(): Promise<Response> {
-    const titles = this.#library.listTitles({ kind: 'movie' });
+    const titles = this.#library.listTitles();
     const duplicates = this.#library.duplicateGroups();
     const storedMagnets = this.#library.listMagnets();
     const statuses = await this.#pool.refresh();
     const cdnBroken = new Set(statuses.filter((s) => s.cdnHealthy === false).map((s) => s.accountId));
 
-    // Build a quick map from title key -> TMDB poster for the cells.
-    // The library only stores imdb_id/tmdb_id; if tmdb is null we render
-    // a placeholder. The full TMDB cache is intentionally not stored.
+    const moviesCount = titles.filter((t) => t.kind === 'movie').length;
+    const seriesCount = titles.filter((t) => t.kind === 'series').length;
+    const uhdCount = titles.filter((t) => t.bestResolution && t.bestResolution >= 2160).length;
+    const fhdCount = titles.filter((t) => t.bestResolution && t.bestResolution >= 1080 && t.bestResolution < 2160).length;
+    const tornCount = titles.filter((t) => {
+      const files = this.#library.filesForTitle(t.key);
+      return files.some((f) => cdnBroken.has(f.accountId));
+    }).length;
+
+    const cards = titles.map((t) => this.#posterCard(t, cdnBroken)).join('');
     const rows = titles.map((t) => this.#movieRow(t, cdnBroken)).join('');
 
     const body = html`
       <div class="page-head">
         <div class="lead">
-          <div class="eyebrow">Library</div>
-          <h1>Movies <span class="num">· ${titles.length}</span></h1>
+          <div class="eyebrow"><i data-lucide="film"></i> Media Catalog</div>
+          <h1>Library <span class="num">· ${titles.length} titles · ${storedMagnets.length} magnets</span></h1>
           <p class="lede">
-            Hover a row to see actions. Tinted rows are on a torn reel (HLS-only). Use Move to consolidate.
+            Explore your synchronized media library across all pool nodes. Direct CDN streams provide instant 4K & 1080p playback in Stremio.
           </p>
         </div>
         <div class="actions">
           <form class="inline" method="post" action="/admin/reindex" data-inline style="display:inline;">
-            <button class="btn" type="submit"><i data-lucide="refresh-cw"></i> Reindex</button>
+            <button class="btn" type="submit"><i data-lucide="refresh-cw"></i> Reindex catalog</button>
           </form>
-          <a class="btn" href="/admin" data-nav><i data-lucide="arrow-left"></i> Back</a>
+          <a class="btn" href="/admin" data-nav><i data-lucide="arrow-left"></i> Overview</a>
         </div>
       </div>
 
-      <div class="section">
-        <div class="section-head">
-          <h2><i data-lucide="film"></i> Movies <span class="count">${titles.length}</span></h2>
-          <div class="search-bar" style="margin: 0;">
-            <input type="text" class="search-input" placeholder="Search by title, IMDb, account…" data-table="movieTable" />
+      <!-- Library Filter & View Toolbar -->
+      <div class="view-toolbar">
+        <div class="filter-tabs">
+          <button class="filter-tab active" onclick="filterLibraryCategory(this, 'all')">All Media (${titles.length})</button>
+          <button class="filter-tab" onclick="filterLibraryCategory(this, 'movie')">🎬 Movies (${moviesCount})</button>
+          <button class="filter-tab" onclick="filterLibraryCategory(this, 'series')">📺 TV Series (${seriesCount})</button>
+          <button class="filter-tab" onclick="filterLibraryCategory(this, 'res-4k')">💎 4K UHD (${uhdCount})</button>
+          <button class="filter-tab" onclick="filterLibraryCategory(this, 'res-1080p')">✨ 1080p (${fhdCount})</button>
+          ${tornCount > 0 ? html`<button class="filter-tab" onclick="filterLibraryCategory(this, 'torn')">⚠️ Torn Reels (${tornCount})</button>` : ''}
+        </div>
+
+        <div style="display:flex; align-items:center; gap: 0.65rem; flex-wrap:wrap;">
+          <div class="search-bar">
+            <i data-lucide="search" class="search-icon"></i>
+            <input type="text" class="search-input" placeholder="Quick search titles, IMDb…" />
+          </div>
+
+          <div class="view-toggle">
+            <button class="view-toggle-btn active" id="btnViewGrid" onclick="setLibraryView('grid')" title="Poster Grid View">
+              <i data-lucide="layout-grid"></i> Grid
+            </button>
+            <button class="view-toggle-btn" id="btnViewTable" onclick="setLibraryView('table')" title="Detailed Table View">
+              <i data-lucide="list"></i> Table
+            </button>
           </div>
         </div>
-        ${titles.length === 0
-          ? raw(html`
-              <div class="empty">
-                <h3>No movies yet</h3>
-                <p>Add a magnet from the overview. The indexer picks up finished downloads within a minute.</p>
-                <a class="btn primary" href="/admin#ingestForm" data-nav>Ingest a magnet</a>
-              </div>
-            `)
-          : raw(html`
-              <div class="table-wrap">
-                <table id="movieTable">
-                  <thead><tr>
-                    <th>Title</th><th>Year</th><th>Quality</th><th>Playback</th>
-                    <th>Files</th><th>Size</th><th>On</th><th></th>
-                  </tr></thead>
-                  <tbody>${raw(rows)}</tbody>
-                </table>
-              </div>
-            `)}
       </div>
+
+      ${titles.length === 0
+        ? raw(html`
+            <div class="empty">
+              <h3>No media indexed yet</h3>
+              <p>Add a magnet from the overview. The indexer catalogs completed downloads in real time.</p>
+              <a class="btn primary" href="/admin#ingestForm" data-nav>Ingest a magnet</a>
+            </div>
+          `)
+        : raw(html`
+            <!-- Poster Grid View -->
+            <div class="poster-grid" id="libraryGrid">
+              ${raw(cards)}
+            </div>
+
+            <!-- Detailed Table View -->
+            <div class="table-wrap" id="libraryTableWrap" style="display:none; margin-bottom: 1.5rem;">
+              <table id="movieTable">
+                <thead><tr>
+                  <th>Title & Metadata</th><th>Type</th><th>Year</th><th>Quality</th><th>Playback</th>
+                  <th>Files</th><th>Size</th><th>Nodes</th><th>Actions</th>
+                </tr></thead>
+                <tbody>${raw(rows)}</tbody>
+              </table>
+            </div>
+          `)}
 
       ${duplicates.length > 0
         ? raw(html`
             <div class="section">
               <div class="section-head">
-                <h2><i data-lucide="copy"></i> Duplicates <span class="count">${duplicates.length} group${duplicates.length === 1 ? '' : 's'}</span></h2>
-                <span class="muted" style="font-size: 0.78rem;">Same SHA-1 on multiple accounts. Use Move to consolidate.</span>
+                <h2><i data-lucide="copy"></i> Duplicate Torrents <span class="count">${duplicates.length} groups</span></h2>
+                <span class="muted" style="font-size: 0.78rem;">Identical SHA-1 files across multiple accounts. Use Move to consolidate space.</span>
               </div>
               <div class="table-wrap">
                 <table>
-                  <thead><tr><th>SHA-1</th><th>Copies</th><th>Distribution</th></tr></thead>
+                  <thead><tr><th>SHA-1 Hash</th><th>Copies</th><th>Distribution</th></tr></thead>
                   <tbody>
                     ${raw(
                       duplicates
@@ -379,10 +495,12 @@ export class AdminApp {
       ${storedMagnets.length > 0
         ? raw(html`
             <div class="section">
-              <div class="section-head"><h2><i data-lucide="magnet"></i> Stored magnets <span class="count">${storedMagnets.length}</span></h2></div>
+              <div class="section-head">
+                <h2><i data-lucide="magnet"></i> Stored Magnets <span class="count">${storedMagnets.length}</span></h2>
+              </div>
               <div class="table-wrap">
                 <table>
-                  <thead><tr><th>Folder</th><th>Landing</th><th>Added</th><th></th></tr></thead>
+                  <thead><tr><th>Folder Name</th><th>Landing Node</th><th>Added</th><th>Action</th></tr></thead>
                   <tbody>
                     ${raw(
                       storedMagnets
@@ -418,6 +536,104 @@ export class AdminApp {
     );
   }
 
+  #posterCard(t: TitleSummary, cdnBroken: Set<string>): string {
+    const files = this.#library.filesForTitle(t.key);
+    const accounts = [...new Set(files.map((f) => f.accountId))];
+    const isTorn = accounts.some((a) => cdnBroken.has(a));
+    const allTorn = accounts.length > 0 && accounts.every((a) => cdnBroken.has(a));
+    const primaryFile = files[0];
+    const movable = files.some((f) => f.magnet !== null);
+
+    const isUhd = t.bestResolution && t.bestResolution >= 2160;
+    const isFhd = t.bestResolution && t.bestResolution >= 1080 && t.bestResolution < 2160;
+
+    let resClass = 'res-sd';
+    let resBadge = '<span class="pill muted">SD</span>';
+    if (isUhd) {
+      resClass = 'res-4k';
+      resBadge = '<span class="pill purple">4K UHD</span>';
+    } else if (isFhd) {
+      resClass = 'res-1080p';
+      resBadge = '<span class="pill ok">1080p</span>';
+    } else if (t.bestResolution && t.bestResolution >= 720) {
+      resClass = 'res-720p';
+      resBadge = '<span class="pill warn">720p</span>';
+    }
+
+    const playState = allTorn
+      ? '<span class="pill warn"><span class="dot"></span>HLS</span>'
+      : isTorn
+        ? '<span class="pill warn"><span class="dot"></span>Mixed</span>'
+        : '<span class="pill ok"><span class="dot"></span>Direct</span>';
+
+    const posterUrl = t.imdbId
+      ? `https://images.metahub.space/poster/medium/${esc(t.imdbId)}/img.jpg`
+      : null;
+
+    const categoryClasses = [
+      t.kind,
+      resClass,
+      allTorn || isTorn ? 'torn' : 'healthy',
+    ].join(' ');
+
+    const stremioLink = t.imdbId
+      ? `<a class="btn btn-sm primary" href="stremio:///detail/${t.kind === 'series' ? 'series' : 'movie'}/${esc(t.imdbId)}" target="_blank" rel="noreferrer"><i data-lucide="play"></i> Play</a>`
+      : '';
+
+    const moveAction = movable && primaryFile
+      ? `<form class="inline" method="post" action="/admin/move" data-inline>
+           <input type="hidden" name="accountId" value="${esc(primaryFile.accountId)}" />
+           <input type="hidden" name="fileId" value="${esc(primaryFile.fileId)}" />
+           <button class="btn btn-sm" type="submit" title="Move to another node"><i data-lucide="arrow-right-left"></i> Move</button>
+         </form>`
+      : '';
+
+    const copyLink = primaryFile
+      ? `<button class="btn btn-sm" type="button" title="Copy stream URL"
+                 onclick="copyText(this, '/${esc(this.#config.addonSecret)}/play/${esc(primaryFile.accountId)}/${esc(primaryFile.fileId)}')">
+                 <i data-lucide="link"></i> Copy
+               </button>`
+      : '';
+
+    const deleteAction = primaryFile
+      ? `<form class="inline" method="post" action="/admin/file/delete" data-inline>
+           <input type="hidden" name="accountId" value="${esc(primaryFile.accountId)}" />
+           <input type="hidden" name="fileId" value="${esc(primaryFile.fileId)}" />
+           <button class="btn btn-sm danger" type="submit" title="Delete from Seedr"><i data-lucide="trash-2"></i></button>
+         </form>`
+      : '';
+
+    return `
+      <div class="poster-card ${allTorn ? 'torn' : ''} ${categoryClasses}" data-category="${categoryClasses}">
+        <div class="poster-cover">
+          ${
+            posterUrl
+              ? `<img src="${posterUrl}" alt="${esc(t.name)}" loading="lazy" onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\'poster-fallback\\'><i data-lucide=\\'film\\'></i><span>${esc(t.name.slice(0, 2).toUpperCase())}</span></div>'; hydrateIcons();" />`
+              : `<div class="poster-fallback"><i data-lucide="${t.kind === 'series' ? 'tv' : 'film'}"></i><span>${esc(t.name.slice(0, 2).toUpperCase())}</span></div>`
+          }
+          <div class="poster-badges">
+            ${resBadge}
+            ${playState}
+          </div>
+          <div class="poster-overlay-actions">
+            ${stremioLink}
+            <div style="display:flex; gap: 0.3rem;">
+              ${moveAction}
+              ${copyLink}
+              ${deleteAction}
+            </div>
+          </div>
+        </div>
+        <div class="poster-info">
+          <div class="poster-title" title="${esc(t.name)}">${esc(t.name)}</div>
+          <div class="poster-meta">
+            <span>${t.year ?? '—'} · ${t.fileCount} file${t.fileCount === 1 ? '' : 's'}</span>
+            <span class="poster-node-tag">${esc(accounts.join(', '))}</span>
+          </div>
+        </div>
+      </div>`;
+  }
+
   #movieRow(t: TitleSummary, cdnBroken: Set<string>): string {
     const files = this.#library.filesForTitle(t.key);
     const accounts = [...new Set(files.map((f) => f.accountId))];
@@ -426,12 +642,21 @@ export class AdminApp {
     const movable = files.some((f) => f.magnet !== null);
     const primaryFile = files[0];
 
-    const resBadge =
-      t.bestResolution && t.bestResolution >= 2160 ? '<span class="pill purple">4K</span>'
-      : t.bestResolution && t.bestResolution >= 1080 ? '<span class="pill ok">1080p</span>'
-      : t.bestResolution && t.bestResolution >= 720 ? '<span class="pill warn">720p</span>'
-      : t.bestResolution && t.bestResolution >= 480 ? '<span class="pill muted">SD</span>'
-      : '<span class="dim mono">—</span>';
+    const isUhd = t.bestResolution && t.bestResolution >= 2160;
+    const isFhd = t.bestResolution && t.bestResolution >= 1080 && t.bestResolution < 2160;
+
+    let resClass = 'res-sd';
+    let resBadge = '<span class="pill muted">SD</span>';
+    if (isUhd) {
+      resClass = 'res-4k';
+      resBadge = '<span class="pill purple">4K</span>';
+    } else if (isFhd) {
+      resClass = 'res-1080p';
+      resBadge = '<span class="pill ok">1080p</span>';
+    } else if (t.bestResolution && t.bestResolution >= 720) {
+      resClass = 'res-720p';
+      resBadge = '<span class="pill warn">720p</span>';
+    }
 
     const playState = allTorn
       ? '<span class="pill warn"><span class="dot"></span>HLS</span>'
@@ -441,18 +666,6 @@ export class AdminApp {
           ? '<span class="pill ok"><span class="dot"></span>Direct</span>'
           : '<span class="dim mono">—</span>';
 
-    // TMDB art: we don't store the poster path in the library DB, so
-    // we use the imdb_id as a Cinemeta-equivalent and only show a poster
-    // for titles that have one in the index. Without a local cache, we
-    // render a stable placeholder with the title's first letter.
-    const initial = (t.name[0] ?? '?').toUpperCase();
-    const poster = t.imdbId
-      ? `https://placehold.co/44x64/1c2230/e6ebf2?text=${encodeURIComponent(initial)}&font=roboto`
-      : `https://placehold.co/44x64/1c2230/6a5f4d?text=${encodeURIComponent(initial)}&font=roboto`;
-
-    // Build the "on" label with already-HTML `<span>` for the +N suffix
-    // (raw() inside a plain template string is the only way to keep that
-    // span un-escaped without writing the whole row through html`…`).
     const accountsLabel =
       accounts.length === 0
         ? '—'
@@ -460,10 +673,6 @@ export class AdminApp {
           ? esc(accounts.join(', '))
           : `${esc(accounts.slice(0, 2).join(', '))} ${raw(`<span class="muted">+${accounts.length - 2}</span>`)}`;
 
-    // Per-file actions: move (one click), copy download link (so the
-    // operator can pull to a laptop), delete (removes from library
-    // AND from Seedr). We surface these on every row, with disable
-    // states when the file has no stored magnet or no playback URL.
     const moveAction = movable && primaryFile
       ? `<form class="inline" method="post" action="/admin/move" data-inline>
            <input type="hidden" name="accountId" value="${esc(primaryFile.accountId)}" />
@@ -480,7 +689,7 @@ export class AdminApp {
       : '';
 
     const stremioLink = t.imdbId
-      ? `<a class="btn btn-sm primary" href="stremio:///detail/movie/${esc(t.imdbId)}" target="_blank" rel="noreferrer"><i data-lucide="play"></i> Stremio</a>`
+      ? `<a class="btn btn-sm primary" href="stremio:///detail/${t.kind === 'series' ? 'series' : 'movie'}/${esc(t.imdbId)}" target="_blank" rel="noreferrer"><i data-lucide="play"></i> Stremio</a>`
       : '';
 
     const deleteAction = primaryFile
@@ -491,33 +700,47 @@ export class AdminApp {
          </form>`
       : '';
 
-        const actions = `<div class="row-actions">${stremioLink}${moveAction}${copyLink}${deleteAction}</div>`;
-
+    const actions = `${stremioLink}${moveAction}${copyLink}${deleteAction}`;
     const trClass = allTorn ? 'torn' : isTorn ? 'mixed' : '';
+    const categoryClasses = [
+      t.kind,
+      resClass,
+      allTorn || isTorn ? 'torn' : 'healthy',
+    ].join(' ');
 
-    return `<tr class="${trClass}">
+    const initial = (t.name[0] ?? '?').toUpperCase();
+    const posterUrl = t.imdbId
+      ? `https://images.metahub.space/poster/small/${esc(t.imdbId)}/img.jpg`
+      : null;
+
+    return `<tr class="${trClass} ${categoryClasses}" data-category="${categoryClasses}">
       <td>
         <div class="movie-cell">
-          <div class="poster"><img src="${esc(poster)}" alt="" loading="lazy" onerror="this.style.display='none'"/></div>
+          <div class="poster-thumb">
+            ${
+              posterUrl
+                ? `<img src="${posterUrl}" alt="" onerror="this.onerror=null; this.parentElement.textContent='${initial}';" />`
+                : initial
+            }
+          </div>
           <div class="meta">
             <div class="title">${esc(t.name)}</div>
             <div class="sub">
               ${t.imdbId !== null
-                ? html`<span class="id">${esc(t.imdbId)}</span>`
-                : html`<span class="id dim">awaiting metadata</span>`}
-              <span>·</span>
-              <span>${t.fileCount} file${t.fileCount === 1 ? '' : 's'}</span>
+                ? `<a href="https://www.imdb.com/title/${esc(t.imdbId)}/" target="_blank" rel="noreferrer">${esc(t.imdbId)}</a>`
+                : '<span class="dim">awaiting metadata</span>'}
             </div>
-            ${actions}
           </div>
         </div>
       </td>
+      <td class="mono dim">${t.kind === 'series' ? '<span class="pill muted">TV Series</span>' : '<span class="pill muted">Movie</span>'}</td>
       <td class="mono dim">${t.year ?? '—'}</td>
       <td>${resBadge}</td>
       <td>${playState}</td>
       <td class="mono">${t.fileCount}</td>
       <td class="mono">${formatBytes(t.totalSize)}</td>
       <td class="mono dim">${accountsLabel}</td>
+      <td><div class="row-actions">${actions}</div></td>
     </tr>`;
   }
 
@@ -1115,6 +1338,102 @@ export class AdminApp {
   }
 
   // ---------- One-off result page ----------
+
+  /**
+   * Trigger a fresh per-account dump now and return a redirect with a
+   * success or failure message. The dumper itself lives in the entrypoint
+   * because it owns the timer.
+   */
+  async dumpNow(
+    runDump: () => Promise<{ written: string[]; errors: string[] }> = this.#runDump,
+  ): Promise<Response> {
+    try {
+      const { written, errors } = await runDump();
+      const ok = written.length;
+      const err = errors.length;
+      this.#library.recordActivity(
+        'info',
+        `Dump ran: ${ok} written, ${err} errors`,
+        written.length > 0 ? written[0] : undefined,
+      );
+      if (err > 0) {
+        return this.#message('bad', `Dump ran but ${err} account${err === 1 ? '' : 's'} failed. Check the activity log.`);
+      }
+      return this.#message('ok', `Dumped ${ok} account${ok === 1 ? '' : 's'}. Files in data/dumps/.`);
+    } catch (err) {
+      return this.#message('bad', `Dump failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * Dumps index — lists the latest per-account JSON file, with size and
+   * mtime. Files themselves are not served through the admin (the operator
+   * reads them off the host), but the page is a useful inventory.
+   */
+  async dumps(): Promise<Response> {
+    const { readdir, stat } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await readdir(this.#config.dumpsDir, { withFileTypes: true });
+    } catch {
+      return this.#message('bad', `Dumps directory not found: ${this.#config.dumpsDir}`);
+    }
+    const latestByAccount = new Map<string, { name: string; size: number; mtime: number }>();
+    for (const e of entries) {
+      if (!e.isFile()) continue;
+      const m = /^([^.]+)\.(\d+)\.json$/.exec(e.name);
+      if (!m || !m[1] || !m[2]) continue;
+      const path = join(this.#config.dumpsDir, e.name);
+      const s = await stat(path).catch(() => null);
+      if (!s) continue;
+      const existing = latestByAccount.get(m[1]);
+      if (!existing || m[2] > String(existing.mtime)) {
+        latestByAccount.set(m[1], { name: e.name, size: s.size, mtime: Number(m[2]) });
+      }
+    }
+    const rows = [...latestByAccount.entries()].sort(([a], [b]) => a.localeCompare(b));
+    const tableRows = rows.length === 0
+      ? '<tr><td colspan="4" class="muted">No dumps yet — the dumper runs every 6h and on startup.</td></tr>'
+      : rows.map(([accountId, info]) =>
+          `<tr>
+            <td class="mono">${esc(accountId)}</td>
+            <td class="mono">${esc(info.name)}</td>
+            <td class="mono dim">${(info.size / 1024).toFixed(1)} KiB</td>
+            <td class="muted">${new Date(info.mtime).toISOString().replace('T', ' ').slice(0, 19)}</td>
+          </tr>`,
+        ).join('');
+    const body = html`
+      <div class="page-head">
+        <div class="lead">
+          <div class="eyebrow"><i data-lucide="database"></i> Account Dumps</div>
+          <h1>Latest dump per account <span class="num">· ${rows.length} file${rows.length === 1 ? '' : 's'}</span></h1>
+          <p class="lede">
+            Each row is a per-account JSON snapshot written by the periodic dumper.
+            The access token in each dump is masked — only the prefix and last 4 chars
+            are stored. Use <code>cat data/dumps/acc1.*.json | jq</code> to read one.
+          </p>
+        </div>
+        <div class="actions">
+          <form class="inline" method="post" action="/admin/dump" data-inline style="display:inline;">
+            <button class="btn primary" type="submit"><i data-lucide="play"></i> Dump now</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Account</th><th>File</th><th>Size</th><th>Captured at</th>
+            </tr></thead>
+            <tbody>${raw(tableRows)}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+    return htmlResponse(layout({ title: 'Dumps', activeNav: '/admin/dumps', body }));
+  }
 
   #message(kind: 'ok' | 'bad', text: string): Response {
     const title = kind === 'ok' ? 'Done' : 'Problem';

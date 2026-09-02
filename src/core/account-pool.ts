@@ -427,6 +427,32 @@ export class AccountPool {
     );
     return results.flat();
   }
+
+  /**
+   * Returns a structured snapshot of every account. Each provider's
+   * `dumpAccount` is called in parallel; failures don't poison the rest.
+   *
+   * Used by the periodic dumper in `src/index.ts` and the operator
+   * console's "dump now" button.
+   */
+  async dumpAll(): Promise<Array<{ accountId: string; ok: true; dump: unknown } | { accountId: string; ok: false; error: string }>> {
+    return Promise.all(
+      this.#entries.map(async (entry) => {
+        try {
+          const dump = await (entry.provider as unknown as {
+            dumpAccount: () => Promise<unknown>;
+          }).dumpAccount();
+          return { accountId: entry.provider.accountId, ok: true, dump };
+        } catch (err) {
+          return {
+            accountId: entry.provider.accountId,
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+      }),
+    );
+  }
 }
 
 /**

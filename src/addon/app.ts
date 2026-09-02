@@ -218,6 +218,80 @@ export class AddonApp {
   }
 
   /**
+   * Returns the live Seedr CDN URL for a file as JSON. Used by the operator
+   * console's "Copy download URL" button — the URL is the same `ff_get`
+   * address Stremio's player would follow, which then 302s to the
+   * `/download/archive/<sha256>?token=...&exp=...` archive URL.
+   */
+  async fileUrl(ctx: RouteContext): Promise<Response> {
+    const result = await this.#mintPlaybackUrl(ctx);
+    if (result instanceof Response) return result;
+    const params = ctx.request.url.includes('?')
+      ? new URLSearchParams(ctx.request.url.split('?')[1] ?? '')
+      : new URLSearchParams();
+    return new Response(
+      JSON.stringify({
+        url: result.url,
+        filename: result.filename,
+        expiresAt: result.expiresAt,
+        kind: result.kind,
+        accountId: ctx.params['accountId'] ?? params.get('accountId') ?? '',
+        fileId: ctx.params['fileId'] ?? params.get('fileId') ?? '',
+      }),
+      { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } },
+    );
+  }
+
+  /**
+   * 302-redirects to the live Seedr CDN URL. Used by the operator
+   * console's "Download" button — opens the file in a new tab, the
+   * browser follows the Seedr 302 to the archive URL.
+   */
+  async fileDownload(ctx: RouteContext): Promise<Response> {
+    const url = await this.#mintPlaybackUrl(ctx);
+    if (url instanceof Response) return url;
+    return redirect(url.url, 302);
+  }
+
+  /**
+   * Mints a fresh Seedr URL for a file. Returns either a response (on
+   * error) or the playback metadata.
+   */
+  async #mintPlaybackUrl(
+    ctx: RouteContext,
+  ): Promise<
+    | Response
+    | { url: string; filename: string; expiresAt: number | null; kind: 'direct' | 'hls' }
+  > {
+    const params = ctx.request.url.includes('?')
+      ? new URLSearchParams(ctx.request.url.split('?')[1] ?? '')
+      : new URLSearchParams();
+    const accountId = ctx.params['accountId'] ?? params.get('accountId') ?? '';
+    const fileId = ctx.params['fileId'] ?? params.get('fileId') ?? '';
+    if (!accountId || !fileId) {
+      return new Response(JSON.stringify({ error: 'missing accountId or fileId' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    const provider = this.#pool().provider(accountId);
+    if (!provider) {
+      return new Response(JSON.stringify({ error: `unknown account ${accountId}` }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    try {
+      return await provider.getPlaybackUrl(fileId);
+    } catch (err) {
+      return new Response(
+        JSON.stringify({ error: err instanceof Error ? err.message : String(err) }),
+        { status: 502, headers: { 'content-type': 'application/json' } },
+      );
+    }
+  }
+
+  /**
    * Generated poster fallback.
    *
    * Used only when the title has no IMDb match yet, so we have no TMDB poster

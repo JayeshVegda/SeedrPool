@@ -25,6 +25,12 @@ export interface Config {
   /** SQLite database path. */
   databasePath: string;
   /**
+   * Where periodic per-account JSON dumps land. One file per account per
+   * dump, named `<accountId>.<unixMs>.json`. Old dumps are pruned; see
+   * `Dumper` for the retention policy.
+   */
+  dumpsDir: string;
+  /**
    * Unguessable URL segment protecting the addon routes. Anyone holding it can
    * browse and stream the library.
    */
@@ -51,6 +57,7 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
     env['SEEDRPOOL_CREDENTIALS_PATH'] ?? join(secretsDir, 'seedrpool-credentials.txt');
   const tokenPath = env['SEEDRPOOL_TOKEN_PATH'] ?? join(secretsDir, 'seedrpool-accounts.env');
   const databasePath = env['SEEDRPOOL_DB_PATH'] ?? '/opt/stacks/sites/seedrpool/data/library.sqlite';
+  const dumpsDir = env['SEEDRPOOL_DUMPS_DIR'] ?? '/app/data/dumps';
   const secretPath =
     env['SEEDRPOOL_ADDON_SECRET_PATH'] ?? join(secretsDir, 'seedrpool-addon-secret');
 
@@ -62,6 +69,7 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
     credentialsPath,
     tokenPath,
     databasePath,
+    dumpsDir,
     addonSecret,
     publicUrl: (env['SEEDRPOOL_PUBLIC_URL'] ?? 'https://seedr.zayu.dev').replace(/\/$/, ''),
     adminUser: env['SEEDRPOOL_ADMIN_USER'] ?? 'jay',

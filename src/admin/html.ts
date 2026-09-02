@@ -723,6 +723,217 @@ mark.hit {
 .notice.ok  { border-left-color: var(--ok); }
 
 /* ===========================================================
+   Library Poster Grid & Streaming Cards (Plex / Stremio style)
+   =========================================================== */
+
+.poster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1.15rem;
+  margin-bottom: 1.5rem;
+}
+
+.poster-card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  transition: transform var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.poster-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--accent);
+  box-shadow: 0 12px 24px -8px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--accent-soft);
+}
+.poster-card.torn {
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+.poster-cover {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  background: var(--surface-3);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.poster-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.4s var(--ease);
+}
+.poster-card:hover .poster-cover img {
+  transform: scale(1.04);
+}
+.poster-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 1.5rem;
+  font-weight: 700;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #161c28 0%, #0d1117 100%);
+}
+.poster-fallback [data-lucide] {
+  width: 32px;
+  height: 32px;
+  color: var(--text-faint);
+}
+
+.poster-badges {
+  position: absolute;
+  top: 0.55rem;
+  left: 0.55rem;
+  right: 0.55rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.poster-overlay-actions {
+  position: absolute;
+  inset: 0;
+  background: rgba(12, 15, 20, 0.85);
+  backdrop-filter: blur(4px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--t-fast) var(--ease);
+  z-index: 3;
+}
+.poster-card:hover .poster-overlay-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.poster-info {
+  padding: 0.75rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex: 1;
+  background: var(--surface-1);
+}
+.poster-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.poster-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: auto;
+  padding-top: 0.3rem;
+  border-top: 1px solid var(--border);
+}
+.poster-node-tag {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--accent);
+  max-width: 7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* View Switcher & Filter Tabs */
+.view-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+.filter-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.filter-tab {
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.filter-tab:hover {
+  color: var(--text);
+  border-color: var(--border-2);
+}
+.filter-tab.active {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.view-toggle {
+  display: inline-flex;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+.view-toggle-btn {
+  padding: 0.3rem 0.55rem;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.view-toggle-btn:hover {
+  color: var(--text);
+}
+.view-toggle-btn.active {
+  background: var(--surface-3);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ===========================================================
    Activity timeline
    =========================================================== */
 
@@ -790,23 +1001,22 @@ mark.hit {
   white-space: normal;
   padding: 0.5rem 0.85rem;
 }
-.movie-cell .poster {
-  width: 44px;
-  height: 64px;
+.movie-cell .poster-thumb {
+  width: 36px;
+  height: 52px;
   border-radius: 4px;
-  background: var(--bg);
-  object-fit: cover;
-  flex-shrink: 0;
   background: var(--surface-3);
   display: grid;
   place-items: center;
   font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--text-dim);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--accent);
   overflow: hidden;
   border: 1px solid var(--border-2);
+  flex-shrink: 0;
 }
-.movie-cell .poster img { width: 100%; height: 100%; object-fit: cover; }
+.movie-cell .poster-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .movie-cell .meta { min-width: 0; flex: 1; }
 .movie-cell .title { font-weight: 600; color: var(--text); font-size: 0.86rem; line-height: 1.2; }
 .movie-cell .sub {
@@ -819,13 +1029,8 @@ mark.hit {
   gap: 0.45rem;
   flex-wrap: wrap;
 }
-.movie-cell .sub .id { color: var(--text-dim); }
-.movie-cell .actions {
-  display: flex;
-  gap: 0.25rem;
-  margin-top: 0.3rem;
-  flex-wrap: wrap;
-}
+.movie-cell .sub a { color: var(--accent); text-decoration: none; }
+.movie-cell .sub a:hover { text-decoration: underline; }
 
 /* ===========================================================
    Filter bar, search, account chips
@@ -835,73 +1040,29 @@ mark.hit {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 0.65rem;
-  flex-wrap: wrap;
+  position: relative;
+  min-width: 220px;
 }
-.search-bar input { flex: 1; min-width: 200px; max-width: 28rem; }
-.search-bar .count { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); }
-
-.chip-group { display: inline-flex; gap: 0.3rem; flex-wrap: wrap; }
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.25rem 0.55rem;
-  border-radius: 999px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  font-family: var(--font-mono);
-  font-size: 0.66rem;
-  color: var(--text-muted);
-  cursor: pointer;
-  user-select: none;
-  transition: border-color var(--t-fast) var(--ease-soft), color var(--t-fast) var(--ease-soft);
+.search-bar .search-icon {
+  position: absolute;
+  left: 0.7rem;
+  color: var(--text-dim);
+  pointer-events: none;
+  width: 14px;
+  height: 14px;
 }
-.chip:hover { color: var(--text); border-color: var(--border-2); }
-.chip.active { background: var(--accent-soft); color: var(--accent); border-color: var(--border-2); }
-.chip .x { color: var(--text-dim); font-size: 0.7rem; }
+.search-bar input {
+  padding-left: 2rem;
+  min-width: 200px;
+}
 
 /* ===========================================================
-   Modal
-   =========================================================== */
-
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  z-index: 300;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-  animation: fade-in var(--t-med) var(--ease) both;
-}
-.modal-backdrop.open { display: flex; }
-.modal {
-  background: var(--surface-2);
-  border: 1px solid var(--border-2);
-  border-radius: 10px;
-  padding: 1.25rem;
-  width: 100%;
-  max-width: 32rem;
-  box-shadow: 0 20px 60px -20px rgba(0, 0, 0, 0.7);
-  animation: modal-in var(--t-med) var(--ease) both;
-}
-.modal-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.85rem; }
-.modal-title { font-size: 1.05rem; font-weight: 600; letter-spacing: -0.015em; }
-.modal-close { background: transparent; border: none; color: var(--text-muted); font-size: 1.2rem; padding: 0.1rem 0.5rem; cursor: pointer; }
-.modal-body { display: flex; flex-direction: column; gap: 0.85rem; }
-.modal-foot { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
-@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes modal-in { from { opacity: 0; transform: translateY(6px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
-
-/* ===========================================================
-   Utility
+   Utility & Animations
    =========================================================== */
 
 @keyframes pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
-  50%      { opacity: 0.55; transform: scale(1.5); }
+  50%      { opacity: 0.55; transform: scale(1.3); }
 }
 .divider { height: 1px; background: var(--border); margin: 0.85rem 0; }
 .spinner {
@@ -936,6 +1097,7 @@ mark.hit {
   .main { padding: 1rem; }
   .page-head { flex-direction: column; align-items: flex-start; }
   .page-head .actions { width: 100%; }
+  .poster-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.75rem; }
 }
 `;
 
@@ -944,9 +1106,6 @@ const CLIENT_SCRIPT = `
   'use strict';
 
   // ----- Toasts (Sonner, CDN) -----
-  // window.toast is set by the sonner-js module script in the page.
-  // If the CDN is blocked or Sonner is still loading, showToast is a no-op
-  // and the rest of the page still works.
   function showToast(kind, title, detail) {
     if (!window.toast) return;
     var opts = detail ? { description: detail } : undefined;
@@ -963,15 +1122,66 @@ const CLIENT_SCRIPT = `
     navigator.clipboard.writeText(text).then(function () {
       var orig = btn.dataset.orig || btn.innerHTML;
       btn.dataset.orig = orig;
-      btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied';
+      btn.innerHTML = '<i data-lucide="check"></i> Copied';
       btn.classList.add('copy-flash');
-      setTimeout(function () { btn.innerHTML = orig; btn.classList.remove('copy-flash'); }, 1400);
+      hydrateIcons();
+      setTimeout(function () {
+        btn.innerHTML = orig;
+        btn.classList.remove('copy-flash');
+        hydrateIcons();
+      }, 1400);
+      showToast('ok', 'Copied to clipboard', text.length > 50 ? text.slice(0, 50) + '…' : text);
     }).catch(function (err) {
       showToast('bad', 'Copy failed', err && err.message);
     });
   };
 
-  // ----- Debounce (utility) -----
+  // ----- View Mode Switcher (Grid / Table) -----
+  window.setLibraryView = function (mode) {
+    var grid = document.getElementById('libraryGrid');
+    var table = document.getElementById('libraryTableWrap');
+    var btnGrid = document.getElementById('btnViewGrid');
+    var btnTable = document.getElementById('btnViewTable');
+
+    if (!grid || !table) return;
+
+    if (mode === 'table') {
+      grid.style.display = 'none';
+      table.style.display = '';
+      if (btnGrid) btnGrid.classList.remove('active');
+      if (btnTable) btnTable.classList.add('active');
+      try { localStorage.setItem('seedrpool_view_mode', 'table'); } catch (e) {}
+    } else {
+      grid.style.display = '';
+      table.style.display = 'none';
+      if (btnGrid) btnGrid.classList.add('active');
+      if (btnTable) btnTable.classList.remove('active');
+      try { localStorage.setItem('seedrpool_view_mode', 'grid'); } catch (e) {}
+    }
+  };
+
+  // ----- Library Tab Filters -----
+  window.filterLibraryCategory = function (btn, category) {
+    document.querySelectorAll('.filter-tab').forEach(function (tab) {
+      tab.classList.remove('active');
+    });
+    btn.classList.add('active');
+
+    var cards = document.querySelectorAll('.poster-card');
+    var rows = document.querySelectorAll('#movieTable tbody tr');
+
+    cards.forEach(function (card) {
+      var match = category === 'all' || card.dataset.category === category || card.classList.contains(category);
+      card.style.display = match ? '' : 'none';
+    });
+
+    rows.forEach(function (row) {
+      var match = category === 'all' || row.dataset.category === category || row.classList.contains(category);
+      row.style.display = match ? '' : 'none';
+    });
+  };
+
+  // ----- Debounce utility -----
   function debounce(fn, ms) {
     var t;
     return function () {
@@ -982,8 +1192,6 @@ const CLIENT_SCRIPT = `
   }
 
   // ----- Inline form action via fetch -----
-  // Posts the form, replaces the <main> with the new page, fires a toast.
-  // Falls back to a real form submit on network error so nothing is lost.
   window.inlineAction = function (form) {
     var btn = form.querySelector('button[type=submit]');
     var orig = btn ? btn.innerHTML : null;
@@ -1008,15 +1216,6 @@ const CLIENT_SCRIPT = `
             var tEl = initial.querySelector('.toast-title');
             var dEl = initial.querySelector('.toast-detail');
             showToast(kind, tEl ? tEl.textContent : 'Done', dEl ? dEl.textContent : '');
-          } else {
-            var notice = doc.querySelector('.notice');
-            if (notice) {
-              showToast(
-                notice.classList.contains('ok') ? 'ok' : 'bad',
-                notice.querySelector('strong') ? notice.querySelector('strong').textContent : 'Notice',
-                notice.textContent.replace(/^\\s*\\S+\\s+/, '').slice(0, 120)
-              );
-            }
           }
           var main = doc.querySelector('main');
           if (main) {
@@ -1025,6 +1224,7 @@ const CLIENT_SCRIPT = `
             );
             rebind();
             hydrateIcons();
+            initCharts();
           }
         } else {
           showToast('bad', 'Action failed', 'HTTP ' + r.status);
@@ -1038,212 +1238,51 @@ const CLIENT_SCRIPT = `
     });
   };
 
-  // ----- Inline delete with confirmation -----
-  // The form's "data-confirm" attribute carries a confirmation message;
-  // we show a small confirm step in the button before submitting.
-  window.confirmAction = function (form) {
-    var msg = form.dataset.confirm || 'Are you sure?';
-    if (!window.toast) return form.submit();
-    // Use Sonner's action-button feature for inline confirm
-    var id = window.toast(msg, {
-      duration: 6000,
-      action: {
-        label: 'Confirm',
-        onClick: function () {
-          window.toast.dismiss(id);
-          // Mark the form so inlineAction doesn't ask again
-          form.dataset.confirmed = '1';
-          window.inlineAction(form);
-        }
-      },
-      cancel: { label: 'Cancel', onClick: function () { window.toast.dismiss(id); } }
-    });
-    return false;
-  };
-
   // ----- Page navigation (instant, no full reload) -----
-  // Intercept nav-link clicks to do an inline swap; this is the "instant
-  // page switching" requirement. Falls back to a full navigation if the
-  // fetch fails (offline, edge case, etc.).
-  function navigate(href, push) {
-    var target = new URL(href, window.location.origin);
-    // Preload the new HTML in parallel; swap when it lands.
-    var p = fetch(target.pathname + target.search, { headers: { 'X-Requested-With': 'fetch' } })
-      .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.text();
-      })
+  function navigate(url) {
+    var target = new URL(url, window.location.href);
+    return fetch(target.href)
+      .then(function (r) { return r.text(); })
       .then(function (html) {
         var doc = new DOMParser().parseFromString(html, 'text/html');
         var main = doc.querySelector('main');
-        if (!main) throw new Error('no main');
-        // Update <title>
-        if (doc.title) document.title = doc.title;
-        // Update active nav state immediately
+        if (!main) { window.location.href = target.href; return; }
+        document.title = doc.title;
         document.querySelectorAll('.nav a').forEach(function (a) {
-          var aUrl = new URL(a.href, window.location.origin);
-          a.toggleAttribute('aria-current', aUrl.pathname === target.pathname);
+          if (a.getAttribute('href') === target.pathname) a.setAttribute('aria-current', 'page');
+          else a.removeAttribute('aria-current');
         });
         document.querySelector('main').replaceChildren.apply(
           document.querySelector('main'), main.childNodes
         );
+        window.history.pushState({ href: target.href }, '', target.href);
         rebind();
         hydrateIcons();
-        // Fire any initial-toast on the destination page
-        var initial = doc.querySelector('.initial-toast');
-        if (initial) {
-          var kind = initial.dataset.kind || 'info';
-          var tEl = initial.querySelector('.toast-title');
-          var dEl = initial.querySelector('.toast-detail');
-          showToast(kind, tEl ? tEl.textContent : 'Done', dEl ? dEl.textContent : '');
-        }
-      });
-    if (push) {
-      history.pushState({ href: target.href }, '', target.href);
-    }
-    return p.catch(function () { window.location.href = target.href; });
+        initCharts();
+      })
+      .catch(function () { window.location.href = target.href; });
   }
   window.navigate = navigate;
 
-  // ----- Search-as-you-type with inline highlighting -----
+  // ----- Live Search -----
   function filterTable(input) {
-    var tableId = input.dataset.table;
-    var table = document.getElementById(tableId);
-    if (!table) return;
     var q = input.value.trim().toLowerCase();
-    var rows = table.querySelectorAll('tbody tr');
+    var cards = document.querySelectorAll('.poster-card');
+    var rows = document.querySelectorAll('#movieTable tbody tr');
+
+    cards.forEach(function (card) {
+      if (!q) { card.style.display = ''; return; }
+      var match = card.textContent.toLowerCase().indexOf(q) !== -1;
+      card.style.display = match ? '' : 'none';
+    });
+
     rows.forEach(function (row) {
-      if (!q) {
-        row.querySelectorAll('mark.hit').forEach(function (m) {
-          m.replaceWith(document.createTextNode(m.textContent));
-        });
-        row.style.display = '';
-        return;
-      }
+      if (!q) { row.style.display = ''; return; }
       var match = row.textContent.toLowerCase().indexOf(q) !== -1;
       row.style.display = match ? '' : 'none';
-      if (match) {
-        var cells = row.querySelectorAll('td');
-        for (var i = 0; i < Math.min(cells.length, 5); i++) {
-          highlight(cells[i], q);
-        }
-      }
-    });
-  }
-  function highlight(cell, q) {
-    cell.querySelectorAll('mark.hit').forEach(function (m) {
-      m.replaceWith(document.createTextNode(m.textContent));
-    });
-    var walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT, null, false);
-    var nodes = [];
-    var n;
-    while ((n = walker.nextNode())) nodes.push(n);
-    nodes.forEach(function (tn) {
-      var idx = tn.textContent.toLowerCase().indexOf(q);
-      if (idx === -1) return;
-      var pre = document.createTextNode(tn.textContent.slice(0, idx));
-      var mark = document.createElement('mark');
-      mark.className = 'hit';
-      mark.textContent = tn.textContent.slice(idx, idx + q.length);
-      var post = document.createTextNode(tn.textContent.slice(idx + q.length));
-      tn.replaceWith(pre, mark, post);
-    });
-  }
-  window.filterTable = filterTable;
-
-  // ----- Live transfer count (poll every 30s) -----
-  function pollTransferCount() {
-    fetch('/admin/transfers/count')
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        var node = document.querySelector('[data-transfer-pulse]');
-        if (!node) return;
-        if (d.count > 0) {
-          node.innerHTML = '<span class="nav-count" style="background: var(--accent); color: var(--bg);">' + d.count + '</span>';
-          node.setAttribute('title', d.count + ' active transfer' + (d.count === 1 ? '' : 's'));
-        } else {
-          node.innerHTML = '';
-          node.removeAttribute('title');
-        }
-      })
-      .catch(function () {});
-  }
-  pollTransferCount();
-  setInterval(pollTransferCount, 30_000);
-
-  // ----- Modal helpers -----
-  function openModal(id) {
-    var el = document.getElementById(id);
-    if (el) el.classList.add('open');
-  }
-  function closeModal(id) {
-    var el = document.getElementById(id);
-    if (el) el.classList.remove('open');
-  }
-  window.openModal = openModal;
-  window.closeModal = closeModal;
-
-  // ----- Wire up everything -----
-  function rebind() {
-    document.querySelectorAll('form[data-inline]').forEach(function (form) {
-      if (form._bound) return;
-      form._bound = true;
-      form.addEventListener('submit', function (e) {
-        e.preventDefault();
-        if (form.dataset.confirm && !form.dataset.confirmed) {
-          return confirmAction(form);
-        }
-        inlineAction(form);
-      });
-    });
-    document.querySelectorAll('a[data-nav]').forEach(function (a) {
-      if (a._bound) return;
-      a._bound = true;
-      a.addEventListener('click', function (e) {
-        e.preventDefault();
-        navigate(a.href, true);
-      });
-    });
-    document.querySelectorAll('.search-input').forEach(function (input) {
-      if (input._h) {
-        input.removeEventListener('input', input._h);
-        input.removeEventListener('keydown', input._kh);
-      }
-      var h = debounce(function () { filterTable(input); }, 90);
-      var kh = function (e) {
-        if (e.key === 'Escape') { input.value = ''; filterTable(input); input.blur(); }
-      };
-      input.addEventListener('input', h);
-      input.addEventListener('keydown', kh);
-      input._h = h; input._kh = kh;
-    });
-    document.querySelectorAll('[data-modal-open]').forEach(function (el) {
-      if (el._bound) return;
-      el._bound = true;
-      el.addEventListener('click', function (e) {
-        e.preventDefault();
-        openModal(el.dataset.modalOpen);
-      });
-    });
-    document.querySelectorAll('[data-modal-close]').forEach(function (el) {
-      if (el._bound) return;
-      el._bound = true;
-      el.addEventListener('click', function (e) {
-        e.preventDefault();
-        closeModal(el.dataset.modalClose);
-      });
-    });
-    // Close any open modal on Escape
-    document.addEventListener('keydown', escCloseModal);
-  }
-  function escCloseModal(e) {
-    if (e.key !== 'Escape') return;
-    document.querySelectorAll('.modal-backdrop.open').forEach(function (m) {
-      m.classList.remove('open');
     });
   }
 
-  // Lucide replaces <i data-lucide="name"> with the actual SVG.
   function hydrateIcons() {
     if (window.lucide && typeof window.lucide.createIcons === 'function') {
       try { window.lucide.createIcons(); } catch (e) {}
@@ -1251,51 +1290,134 @@ const CLIENT_SCRIPT = `
   }
   window.hydrateIcons = hydrateIcons;
 
-  // Initial toast fired on page load
-  function fireInitialToast() {
-    var initial = document.querySelector('.initial-toast');
-    if (!initial) return;
-    var kind = initial.dataset.kind || 'info';
-    var tEl = initial.querySelector('.toast-title');
-    var dEl = initial.querySelector('.toast-detail');
-    showToast(kind, tEl ? tEl.textContent : 'Done', dEl ? dEl.textContent : '');
-    initial.remove();
+  // ----- Chart.js Dashboard Initializer -----
+  function initCharts() {
+    if (!window.Chart) return;
+
+    var storageCanvas = document.getElementById('storageDonutChart');
+    if (storageCanvas && storageCanvas.dataset.chart) {
+      try {
+        var data = JSON.parse(storageCanvas.dataset.chart);
+        new window.Chart(storageCanvas, {
+          type: 'doughnut',
+          data: {
+            labels: data.labels,
+            datasets: [{
+              data: data.values,
+              backgroundColor: data.colors,
+              borderWidth: 2,
+              borderColor: '#161c28',
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '72%',
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                backgroundColor: '#1c2230',
+                titleColor: '#e6ebf2',
+                bodyColor: '#8a96a8',
+                borderColor: 'rgba(160, 175, 200, 0.2)',
+                borderWidth: 1,
+                padding: 10,
+                callbacks: {
+                  label: function (ctx) {
+                    return ' ' + ctx.label + ': ' + ctx.raw + ' GiB';
+                  }
+                }
+              }
+            }
+          }
+        });
+      } catch (e) { console.error('Storage chart init err:', e); }
+    }
+
+    var qualityCanvas = document.getElementById('qualityBarChart');
+    if (qualityCanvas && qualityCanvas.dataset.chart) {
+      try {
+        var qData = JSON.parse(qualityCanvas.dataset.chart);
+        new window.Chart(qualityCanvas, {
+          type: 'bar',
+          data: {
+            labels: qData.labels,
+            datasets: [{
+              label: 'Titles',
+              data: qData.values,
+              backgroundColor: ['#c084fc', '#4ade80', '#f5b942', '#8a96a8'],
+              borderRadius: 6,
+              borderSkipped: false,
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                backgroundColor: '#1c2230',
+                titleColor: '#e6ebf2',
+                bodyColor: '#8a96a8',
+                borderColor: 'rgba(160, 175, 200, 0.2)',
+                borderWidth: 1,
+              }
+            },
+            scales: {
+              x: {
+                grid: { display: false },
+                ticks: { color: '#8a96a8', font: { family: 'var(--font-mono)', size: 11 } }
+              },
+              y: {
+                grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                ticks: { color: '#586273', stepSize: 1, font: { family: 'var(--font-mono)', size: 10 } }
+              }
+            }
+          }
+        });
+      } catch (e) { console.error('Quality chart init err:', e); }
+    }
+  }
+  window.initCharts = initCharts;
+
+  function rebind() {
+    document.querySelectorAll('form[data-inline]').forEach(function (form) {
+      if (form._bound) return;
+      form._bound = true;
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        inlineAction(form);
+      });
+    });
+
+    document.querySelectorAll('.search-input').forEach(function (input) {
+      if (input._h) {
+        input.removeEventListener('input', input._h);
+        input.removeEventListener('keydown', input._kh);
+      }
+      var h = debounce(function () { filterTable(input); }, 60);
+      var kh = function (e) {
+        if (e.key === 'Escape') { input.value = ''; filterTable(input); input.blur(); }
+      };
+      input.addEventListener('input', h);
+      input.addEventListener('keydown', kh);
+      input._h = h; input._kh = kh;
+    });
+
+    // Check saved view mode preference for library
+    try {
+      var savedMode = localStorage.getItem('seedrpool_view_mode');
+      if (savedMode === 'table') window.setLibraryView('table');
+    } catch (e) {}
   }
 
-  // Run as soon as Sonner signals it's ready, OR after a 4s hard timeout.
-  var sonnerReady = new Promise(function (resolve) {
-    var done = false;
-    function go() { if (!done) { done = true; resolve(); } }
-    window.addEventListener('seedrpool:sonner-ready', go, { once: true });
-    setTimeout(go, 4000);
-  });
-  sonnerReady.then(function () {
+  window.addEventListener('DOMContentLoaded', function () {
     hydrateIcons();
     rebind();
-    fireInitialToast();
+    initCharts();
   });
-
-  // ----- Global keyboard shortcuts (only when not in an input) -----
-  document.addEventListener('keydown', function (e) {
-    var t = e.target;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
-    var k = e.key.toLowerCase();
-    if (k === 'r') { var f = document.querySelector('form[action="/admin/reindex"]'); if (f) { e.preventDefault(); f.querySelector('button[type=submit]').click(); } }
-    else if (k === 'g') { e.preventDefault(); navigate('/admin/library', true); }
-    else if (k === 't') { e.preventDefault(); navigate('/admin/transfers', true); }
-    else if (k === 'a') { e.preventDefault(); navigate('/admin/accounts', true); }
-    else if (k === 'h') { e.preventDefault(); navigate('/admin', true); }
-    else if (k === '?') {
-      e.preventDefault();
-      showToast('info', 'Shortcuts',
-        'R = reindex · G = library · T = transfers · A = fleet · H = home · ? = this');
-    }
-  });
-
-  // Back/forward buttons
   window.addEventListener('popstate', function (e) {
-    if (e.state && e.state.href) navigate(e.state.href, false);
+    if (e.state && e.state.href) navigate(e.state.href);
   });
 })();
 `;
@@ -1303,13 +1425,13 @@ const CLIENT_SCRIPT = `
 interface NavItem {
   href: string;
   label: string;
-  short: string; // single-letter shortcut
-  iconName: string; // lucide icon name
+  short: string;
+  iconName: string;
 }
 
 const NAV_ITEMS: NavItem[] = [
   { href: '/admin', label: 'Overview', short: 'H', iconName: 'layout-dashboard' },
-  { href: '/admin/library', label: 'Library', short: 'G', iconName: 'library' },
+  { href: '/admin/library', label: 'Library', short: 'G', iconName: 'film' },
   { href: '/admin/transfers', label: 'Transfers', short: 'T', iconName: 'arrow-down-up' },
   { href: '/admin/accounts', label: 'Fleet', short: 'A', iconName: 'server' },
   { href: '/admin/activity', label: 'Activity', short: 'Y', iconName: 'activity' },
@@ -1325,10 +1447,8 @@ export function layout(options: {
 }): string {
   const navHtml = NAV_ITEMS.map((n) => {
     const isActive = options.activeNav === n.href;
-    const isTransfers = n.href === '/admin/transfers';
-    const pulseAttr = isTransfers ? ' data-transfer-pulse="1"' : '';
     return (
-      `<a href="${esc(n.href)}"${pulseAttr} data-nav${isActive ? ' aria-current="page"' : ''}>` +
+      `<a href="${esc(n.href)}" data-nav${isActive ? ' aria-current="page"' : ''}>` +
       `<span class="icon"><i data-lucide="${n.iconName}"></i></span>` +
       `<span>${esc(n.label)}</span>` +
       `</a>`
@@ -1349,28 +1469,23 @@ export function layout(options: {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(options.title)} · SeedrPool</title>
 <style>${STYLES}</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <div class="app">
   <aside class="sidebar">
     <a href="/admin" class="brand" data-nav>
-      <span class="brand-mark">S</span>
+      <span class="brand-mark"><i data-lucide="layers"></i></span>
       <span class="brand-text">
         <span class="brand-name">SeedrPool</span>
-        <span class="brand-tag">Operator</span>
+        <span class="brand-tag">Command Deck</span>
       </span>
     </a>
-    <div class="nav-section">Workspace</div>
+    <div class="nav-section">Navigation</div>
     <nav class="nav">${navHtml}</nav>
     <div class="sidebar-foot">
-      <button data-inline data-confirm="Reload credentials and rebuild the pool?" type="submit" formaction="/admin/accounts/reload" formmethod="post">
-        <i data-lucide="rotate-ccw"></i> Reload credentials
-      </button>
-      <a href="https://github.com/cliffordmanasseh/mediafusion" target="_blank" rel="noreferrer">
-        <i data-lucide="github"></i> Documentation
-      </a>
       <a href="/healthz" target="_blank" rel="noreferrer">
-        <i data-lucide="heart-pulse"></i> Health
+        <i data-lucide="heart-pulse"></i> Health Check
       </a>
       <div style="padding: 0.35rem 0.65rem; font-size: 0.65rem; color: var(--text-dim); display:flex; align-items:center; gap: 0.4rem;">
         <kbd>?</kbd> for shortcuts
@@ -1381,74 +1496,40 @@ export function layout(options: {
 </div>
 ${initialToastHtml}
 
-<!-- Sonner toaster (CDN-loaded; the toaster container is created
-     automatically on first import). Style overrides live further down
-     so the toast matches the signal-console palette. -->
 <script type="module">
   import toast from 'https://cdn.jsdelivr.net/npm/sonner-js@1.1.3/+esm';
   window.toast = toast;
   toast.config({
     position: 'bottom-right',
     duration: 3500,
-    closeButton: false,
     theme: 'dark',
-    visibleToasts: 4,
   });
   if (window.lucide) window.lucide.createIcons();
-  window.dispatchEvent(new Event('seedrpool:sonner-ready'));
 </script>
 
-<!-- Lucide icons. Pinned to 0.460.0 for stability; update deliberately. -->
 <script src="https://cdn.jsdelivr.net/npm/lucide@0.460.0/dist/umd/lucide.min.js"></script>
-<script>if (window.lucide) window.lucide.createIcons();</script>
+<script>
+  if (window.lucide) window.lucide.createIcons();
+</script>
 
 <style>
-  /* Sonner (sonner-js) theme overrides — the package scopes its vars to
-     [data-sonner-toaster]. We set them at that scope so they take
-     precedence over the package defaults. */
   [data-sonner-toaster][data-sonner-theme="dark"] {
-    --normal-bg:           #1c2230 !important;
-    --normal-bg-hover:     #232a3a !important;
-    --normal-border:       rgba(160, 175, 200, 0.18) !important;
-    --normal-border-hover: rgba(160, 175, 200, 0.28) !important;
-    --normal-text:         #e6ebf2 !important;
+    --normal-bg:           #161c28 !important;
+    --normal-border:       rgba(148, 163, 184, 0.22) !important;
+    --normal-text:         #f1f5f9 !important;
     --success-bg:          rgba(74, 222, 128, 0.12) !important;
     --success-border:      rgba(74, 222, 128, 0.30) !important;
     --success-text:        #4ade80 !important;
     --error-bg:            rgba(248, 113, 113, 0.12) !important;
     --error-border:        rgba(248, 113, 113, 0.30) !important;
     --error-text:          #f87171 !important;
-    --info-bg:             rgba(110, 168, 254, 0.12) !important;
-    --info-border:         rgba(110, 168, 254, 0.30) !important;
-    --info-text:           #6ea8fe !important;
-    --warning-bg:          rgba(217, 148, 65, 0.12) !important;
-    --warning-border:      rgba(217, 148, 65, 0.30) !important;
-    --warning-text:        #d99441 !important;
     --border-radius:       8px !important;
-    --offset:              16px !important;
-    --mobile-offset:       12px !important;
     font-family: var(--font-body) !important;
   }
-  [data-sonner-toaster][data-sonner-toast] {
-    border-radius: 8px !important;
-    box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.6) !important;
-    font-size: 0.84rem !important;
-    padding: 0.7rem 0.9rem !important;
-  }
-  [data-sonner-toaster][data-sonner-toast][data-type="success"] { border-left: 3px solid var(--ok) !important; }
-  [data-sonner-toaster][data-sonner-toast][data-type="error"]   { border-left: 3px solid var(--bad) !important; }
-  [data-sonner-toaster][data-sonner-toast][data-type="warning"] { border-left: 3px solid var(--warn) !important; }
-  [data-sonner-toaster][data-sonner-toast][data-type="info"]    { border-left: 3px solid var(--accent) !important; }
-
-  /* Lucide icon defaults inside the signal-console */
-  [data-lucide] { width: 14px; height: 14px; vertical-align: -2px; }
+  [data-lucide] { width: 15px; height: 15px; vertical-align: -2px; }
   .brand-mark [data-lucide] { width: 16px; height: 16px; color: var(--accent); }
   button [data-lucide], .btn [data-lucide] { width: 13px; height: 13px; }
   .pill [data-lucide] { width: 11px; height: 11px; }
-  .signal-cell .state [data-lucide] { width: 8px; height: 8px; margin-right: 0.3rem; }
-  .nav a .icon [data-lucide] { width: 15px; height: 15px; }
-  .sidebar-foot [data-lucide] { width: 13px; height: 13px; }
-  .movie-cell .poster [data-lucide] { width: 18px; height: 18px; }
 </style>
 
 <script>
