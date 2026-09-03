@@ -19,5 +19,8 @@
     "@types/node": "24.0.1",
     "typescript": "5.8.3",
     "vitest": "3.2.4"
+  },
+  "dependencies": {
+    "parse-torrent-title": "^3.0.1"
   }
 }

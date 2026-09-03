@@ -1,11 +1,14 @@
 # Multi-stage build so the runtime image carries no toolchain.
 #
-# SeedrPool has zero runtime dependencies: fetch and node:sqlite are built into
-# Node 24. The build stage installs devDependencies purely to run tsc, and none
-# of it reaches the runtime image.
+# SeedrPool's only runtime dependency is parse-torrent-title (used for
+# release-name parsing). It is installed as a production dep in the
+# runtime stage with --omit=dev so the build toolchain, the test runner,
+# and all of their transitive deps stay in the build stage and never
+# reach the deployed image.
 #
-# npm is used rather than pnpm because pnpm refuses to run esbuild's postinstall
-# script without an explicit approval step, which fails a non-interactive build.
+# npm is used rather than pnpm because pnpm refuses to run esbuild's
+# postinstall script without an explicit approval step, which fails a
+# non-interactive build.
 
 FROM node:24-alpine AS build
 WORKDIR /app
@@ -28,9 +31,14 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Compiled output only; no node_modules, since there are no runtime deps.
-COPY --from=build /app/dist ./dist
+# The runtime image only needs the production dep tree and the compiled
+# output. --omit=dev skips devDependencies entirely; the rest of node_modules
+# from the build stage is intentionally not copied.
 COPY package.json ./
+COPY package-lock.json ./
+RUN npm install --omit=dev --no-audit --no-fund
+
+COPY --from=build /app/dist ./dist
 
 # The database lives on a mounted volume; the directory must exist and be
 # writable by the unprivileged node user.
