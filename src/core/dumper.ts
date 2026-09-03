@@ -27,8 +27,26 @@ interface DumperOptions {
 export interface DumpSummary {
   written: string[];
   errors: string[];
+  /**
+   * Accounts whose snapshot was written but is missing at least one
+   * section. The file is still useful (it records *why* each section
+   * failed), but the numbers in it are not the account's real state.
+   *
+   * Kept separate from `errors`: an incomplete dump is not a failed dump.
+   * The distinction matters because the previous version reported eight
+   * clean writes while silently persisting zeros for every account.
+   */
+  incomplete: string[];
   /** The number of bytes freed by pruning older dumps this run. */
   prunedBytes: number;
+}
+
+/** The shape the dumper needs from a snapshot. Structural, so tests can fake it. */
+interface DumpLike {
+  complete?: boolean;
+  quota?: { error?: string };
+  root?: { error?: string };
+  transfersError?: string;
 }
 
 export class Dumper {
@@ -51,6 +69,7 @@ export class Dumper {
     const results = await pool.dumpAll();
     const written: string[] = [];
     const errors: string[] = [];
+    const incomplete: string[] = [];
 
     for (const r of results) {
       if (!r.ok) {
@@ -62,10 +81,16 @@ export class Dumper {
       // because the provider stripped it before this module sees it.
       await writeFile(path, JSON.stringify(r.dump, null, 2) + '\n');
       written.push(path);
+
+      const dump = r.dump as DumpLike;
+      if (dump.complete === false) {
+        const why = dump.quota?.error ?? dump.root?.error ?? dump.transfersError ?? 'unknown';
+        incomplete.push(`${r.accountId}: ${why}`);
+      }
     }
 
     const prunedBytes = await this.#prune();
-    return { written, errors, prunedBytes };
+    return { written, errors, incomplete, prunedBytes };
   }
 
   /**

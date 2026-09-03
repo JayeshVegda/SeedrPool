@@ -93,21 +93,35 @@ interface CachedToken {
  * Structured snapshot of an account. The token field holds a short prefix
  * and suffix only — never the full access token. `null` when the provider
  * has not yet logged in (e.g. just added to the pool, first probe pending).
+ *
+ * Each captured section carries its own error slot. This matters: the
+ * previous version caught failures and substituted zeros, so a dump taken
+ * before the account had logged in was byte-identical to a dump of a
+ * genuinely empty account. An operator reading `used: 0` had no way to tell
+ * "this account is empty" from "we could not ask".
  */
 export interface AccountDump {
   accountId: string;
   email: string;
   capturedAt: number;
   token: { issuedAt: number; expiresIn: number; prefix: string; suffix: string } | null;
-  quota: { used: number; max: number; free: number };
+  /**
+   * True when every section was captured cleanly. A single failure flips
+   * this to false, so a reader can check one field rather than three.
+   */
+  complete: boolean;
+  quota: { used: number; max: number; free: number; error?: string };
   root: {
     folders: Array<{ id: string; name: string; size: number }>;
     files: Array<{ id: string; name: string; size: number; folderId: string }>;
+    error?: string;
   };
   transfers: Array<{
     id: string; name: string | null; state: string; progress: number;
     size: number; seeders: number; leechers: number; error: string | null;
   }>;
+  /** Set when the transfer list itself could not be read. */
+  transfersError?: string;
 }
 
 export class SeedrV1Provider implements StorageProvider {
@@ -309,36 +323,89 @@ export class SeedrV1Provider implements StorageProvider {
    * The access token is **never** written in full. The dump stores a
    * short prefix and suffix plus a flag so a re-issued token is
    * distinguishable in the file without leaking the secret.
+   *
+   * Each section records its own failure rather than substituting a zero.
+   * The previous version's `.catch(() => ({ used: 0, ... }))` made an
+   * unreachable account look identical to an empty one on disk, which is
+   * how eight dumps of a 5 GiB account came to read `0.00 GB`.
    */
   async dumpAccount(): Promise<AccountDump> {
     // The token cache is local to the provider instance. We materialize
     // it before the API calls below so a 401-then-relogin does not
     // rewrite the timestamp between snapshots.
-    await this.#accessToken();
+    //
+    // A login failure here is itself worth recording: it is the most
+    // likely reason the rest of the capture will fail.
+    let loginError: string | undefined;
+    try {
+      await this.#accessToken();
+    } catch (err) {
+      loginError = err instanceof Error ? err.message : String(err);
+    }
     const cached = this.#token;
     const tokenDisplay = cached
-      ? { issuedAt: cached.issuedAt, expiresIn: cached.expiresIn, prefix: cached.accessToken.slice(0, 6), suffix: cached.accessToken.slice(-4) }
+      ? {
+          issuedAt: cached.issuedAt,
+          expiresIn: cached.expiresIn,
+          prefix: cached.accessToken.slice(0, 6),
+          suffix: cached.accessToken.slice(-4),
+        }
       : null;
 
-    const [quota, root, transfers] = await Promise.all([
-      this.getQuota().catch((err) => ({ used: 0, max: 0, get free() { return 0; }, error: err instanceof Error ? err.message : String(err) } as never)),
-      this.listFolder(null).catch((err) => ({ folders: [], files: [], error: err instanceof Error ? err.message : String(err) } as never)),
-      this.listTransfers().catch(() => []),
+    const [quotaResult, rootResult, transfersResult] = await Promise.allSettled([
+      this.getQuota(),
+      this.listFolder(null),
+      this.listTransfers(),
     ]);
+
+    const quota = quotaResult.status === 'fulfilled'
+      ? { used: quotaResult.value.used, max: quotaResult.value.max, free: quotaResult.value.free }
+      : { used: 0, max: 0, free: 0, error: describeReason(quotaResult.reason, loginError) };
+
+    const root = rootResult.status === 'fulfilled'
+      ? {
+          folders: rootResult.value.folders.map((f) => ({
+            id: f.id,
+            name: f.name ?? f.path,
+            size: f.size,
+          })),
+          files: rootResult.value.files.map((f) => ({
+            id: f.id,
+            name: f.name,
+            size: f.size,
+            folderId: f.folderId,
+          })),
+        }
+      : {
+          folders: [],
+          files: [],
+          error: describeReason(rootResult.reason, loginError),
+        };
+
+    const transfers = transfersResult.status === 'fulfilled'
+      ? transfersResult.value.map((t) => ({
+          id: t.id, name: t.name, state: t.state, progress: t.progress,
+          size: t.size, seeders: t.seeders, leechers: t.leechers, error: t.error,
+        }))
+      : [];
+
+    const transfersError = transfersResult.status === 'rejected'
+      ? describeReason(transfersResult.reason, loginError)
+      : undefined;
 
     return {
       accountId: this.accountId,
       email: this.email,
       capturedAt: Date.now(),
       token: tokenDisplay,
-      quota: { used: quota.used, max: quota.max, free: quota.free },
-      root: {
-        folders: root.folders.map((f) => ({ id: f.id, name: f.name ?? f.path, size: f.size })),
-        files: root.files.map((f) => ({ id: f.id, name: f.name, size: f.size, folderId: f.folderId })),
-      },
-      transfers: transfers.map((t) => ({
-        id: t.id, name: t.name, state: t.state, progress: t.progress, size: t.size, seeders: t.seeders, leechers: t.leechers, error: t.error,
-      })),
+      complete:
+        quotaResult.status === 'fulfilled' &&
+        rootResult.status === 'fulfilled' &&
+        transfersResult.status === 'fulfilled',
+      quota,
+      root,
+      transfers,
+      ...(transfersError !== undefined ? { transfersError } : {}),
     };
   }
 
@@ -618,6 +685,18 @@ async function readJson(res: Response): Promise<Record<string, unknown>> {
     // Fall through: a non-JSON body is reported with its status instead.
   }
   return { error: text === '' ? `HTTP ${res.status}` : text.slice(0, 200) };
+}
+
+/**
+ * Describes why a dump section failed.
+ *
+ * When the login itself failed, that is the useful root cause — the section
+ * error will just be a downstream symptom of the missing token, so we lead
+ * with the login failure and keep the symptom as context.
+ */
+function describeReason(reason: unknown, loginError: string | undefined): string {
+  const detail = reason instanceof Error ? reason.message : String(reason);
+  return loginError !== undefined ? `login failed: ${loginError} (${detail})` : detail;
 }
 
 /**

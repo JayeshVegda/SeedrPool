@@ -50,15 +50,30 @@ const dumper = new Dumper({ directory: config.dumpsDir });
 const DUMP_INTERVAL_MS = 6 * 60 * 60_000;
 async function runDump(): Promise<DumpResult> {
   try {
-    const { written, errors } = await dumper.dump(pool);
+    const { written, errors, incomplete } = await dumper.dump(pool);
     if (written.length > 0) {
-      console.log(`dump: wrote ${written.length} file${written.length === 1 ? '' : 's'}` + (errors.length > 0 ? `, ${errors.length} error${errors.length === 1 ? '' : 's'}` : ''));
+      console.log(
+        `dump: wrote ${written.length} file${written.length === 1 ? '' : 's'}` +
+        (incomplete.length > 0 ? `, ${incomplete.length} incomplete` : '') +
+        (errors.length > 0 ? `, ${errors.length} error${errors.length === 1 ? '' : 's'}` : ''),
+      );
     }
-    if (errors.length > 0) for (const e of errors) console.warn(`dump: ${e}`);
-    return { written: written.length, errors: errors.length, errorMessages: errors };
+    for (const e of errors) console.warn(`dump: ${e}`);
+    // An incomplete dump is written but its numbers are not the account's
+    // real state. Logging it loudly is the difference between noticing and
+    // silently trusting a file full of zeros.
+    for (const i of incomplete) console.warn(`dump: incomplete ${i}`);
+    return {
+      written: written.length,
+      errors: errors.length,
+      errorMessages: errors,
+      incomplete: incomplete.length,
+      incompleteMessages: incomplete,
+    };
   } catch (err) {
     console.warn('dump: failed:', err instanceof Error ? err.message : err);
-    return { written: 0, errors: 1, errorMessages: [err instanceof Error ? err.message : String(err)] };
+    const message = err instanceof Error ? err.message : String(err);
+    return { written: 0, errors: 1, errorMessages: [message], incomplete: 0, incompleteMessages: [] };
   }
 }
 
@@ -113,7 +128,14 @@ watcher.setOnCompletion(
   enricher,
 );
 
-await runDump();
+// The startup dump is deliberately NOT run here.
+//
+// It used to be, and that was the bug behind eight dumps of a 5 GiB account
+// all reading `0.00 GB`: this point in the file is before the first
+// `pool.refresh()`, so no account had logged in yet, every API call in the
+// snapshot failed, and the old `.catch(() => ({ used: 0 }))` wrote zeros that
+// were indistinguishable from a genuinely empty account. The dump now runs
+// after the startup probe, further down.
 const dumpTimer = setInterval(() => { void runDump(); }, DUMP_INTERVAL_MS);
 dumpTimer.unref();
 
@@ -130,6 +152,9 @@ const router = new Router()
   .get('/admin', () => admin.overview())
   .get('/admin/library', () => admin.library())
   .get('/admin/transfers', () => admin.transfers())
+  // The polled fragment for live updates. htmx on /admin/transfers fires
+  // this every 4s; the response is just the table markup, not a full page.
+  .get('/admin/transfers/table', () => admin.transfersTable())
   .get('/admin/transfers/count', () => admin.transferCount())
   .get('/admin/accounts', () => admin.accounts())
   .get('/admin/accounts/:accountId', (ctx) => admin.accountDetailPage(ctx))
@@ -143,11 +168,13 @@ const router = new Router()
   .post('/admin/api/account/add', (ctx) => actions.addAccount(ctx))
   .post('/admin/api/account/delete', (ctx) => actions.deleteAccount(ctx))
   .post('/admin/api/account/purge', (ctx) => actions.purgeAccount(ctx))
+  .post('/admin/api/account/reauth', (ctx) => actions.reauthAccount(ctx))
   .post('/admin/api/transfer/delete', (ctx) => admin.deleteTransfer(ctx))
   .post('/admin/api/move', (ctx) => admin.moveFile(ctx))
   .post('/admin/api/file/delete', (ctx) => admin.deleteFile(ctx))
   .post('/admin/api/readd', (ctx) => admin.reAddMagnet(ctx))
   .post('/admin/api/reindex', () => actions.reindex())
+  .post('/admin/api/reindex/:accountId', (ctx) => actions.reindexAccount(ctx))
   .post('/admin/api/enrich-all', () => actions.enrichAll())
   .post('/admin/api/clear-metadata', () => actions.clearMetadataAll())
   .post('/admin/api/metadata/:titleKey', (ctx) => actions.clearMetadataOne(ctx))
@@ -221,6 +248,10 @@ for (const status of statuses) {
     : status.healthy ? 'healthy' : `unreachable (${status.reason ?? 'unknown'})`;
   console.log(`account ${status.accountId}: ${state}`);
 }
+
+// Now that every account has logged in, the startup snapshot is meaningful.
+// Fire-and-forget: a slow dump must not delay the server accepting requests.
+void runDump();
 
 void indexer.scanAll()
   .then((results) => {

@@ -22,6 +22,7 @@ import { NoCapacityError } from '../core/account-pool.ts';
 import type { Config } from '../core/config.ts';
 import type { CredentialFile } from '../core/credentials.ts';
 import { esc, formatBytes, html, layout, raw, icon } from './html.ts';
+import { iconMarkup } from './icons.ts';
 import { htmlResponse, json, type RouteContext } from '../core/router.ts';
 import type { LibraryStore, TitleSummary } from '../library/store.ts';
 import { AdminViews, type AccountCard, type AccountDetail, type LibraryCard } from '../core/admin-views.ts';
@@ -356,6 +357,35 @@ export class AdminApp {
         </div>
       </div>
 
+      ${detail.status.needsReauth
+        ? raw(html`
+            <div class="notice bad">
+              <span>
+                <strong>Seedr rejected this account's password.</strong>
+                Nothing will download or play until it is corrected. The pool has
+                stopped retrying to avoid burning the login endpoint's budget.
+              </span>
+              <button class="btn danger" x-data x-on:click="$store.modals.reauth = true">
+                ${icon('rotate-ccw', { size: 13 })} Update password
+              </button>
+            </div>
+          `)
+        : ''}
+
+      ${detail.status.cdnHealthy === false
+        ? raw(html`
+            <div class="notice warn">
+              <span>
+                <strong>Torn reel.</strong>
+                Seedr's CDN is returning 404 for this account's direct downloads
+                (${esc(detail.status.cdnReason ?? 'ff_get 404s')}). Existing files
+                still play via the HLS fallback, and the pool is routing new
+                content elsewhere. It clears itself once Seedr recovers.
+              </span>
+            </div>
+          `)
+        : ''}
+
       <div class="detail-grid">
         <div class="section">
           <div class="section-head"><h2>${icon('database', { size: 12 })} Library <span class="count">${detail.library.titles} titles · ${formatBytes(detail.library.bytes)}</span></h2></div>
@@ -396,10 +426,11 @@ export class AdminApp {
           <div class="card action-cluster">
             <div class="row">
               <button class="btn" hx-post="/admin/api/reload" hx-swap="none">${icon('refresh-cw', { size: 13 })} Re-probe fleet</button>
-              <button class="btn" hx-post="/admin/api/reindex" hx-swap="none">${icon('database', { size: 13 })} Reindex this account</button>
+              <button class="btn" hx-post="/admin/api/reindex/${esc(detail.accountId)}" hx-swap="none">${icon('database', { size: 13 })} Reindex this account</button>
             </div>
             <div class="row">
               <button class="btn" hx-post="/admin/api/dump" hx-swap="none">${icon('archive', { size: 13 })} Dump now</button>
+              <button class="btn" x-data x-on:click="$store.modals.reauth = true">${icon('rotate-ccw', { size: 13 })} Update password</button>
             </div>
             <div class="row" style="margin-top: 0.5rem; border-top: 1px solid var(--border); padding-top: 0.65rem;">
               <button class="btn danger" x-data x-on:click="window.dispatchEvent(new CustomEvent('seedrpool:confirm', { detail: { verb: 'Purge', body: 'Delete every file on this account from both Seedr and the local library. Cannot be undone.', action: 'purge', accountId: '${esc(detail.accountId)}' } }))">${icon('eraser', { size: 13 })} Purge all files</button>
@@ -432,6 +463,47 @@ export class AdminApp {
                 </ul>
               </div>
             `)}
+      </div>
+
+      <!-- Update-password modal. This is the recovery path for an account
+           whose credentials went bad; before this, the only fix was editing
+           the credentials file on the host by hand. The password is verified
+           against Seedr before anything is written, and replaced in place so
+           the positional account ids (and the library rows keyed on them)
+           are never renumbered. -->
+      <div class="modal-backdrop" x-data
+           x-bind:class="$store.modals.reauth ? 'open' : ''"
+           x-on:keydown.escape.window="$store.modals.reauth = false"
+           x-on:click.self="$store.modals.reauth = false">
+        <div class="modal" x-on:click.stop x-show="$store.modals.reauth">
+          <div class="modal-head">
+            <div class="modal-title">${icon('rotate-ccw', { size: 14 })} Update password</div>
+            <button class="modal-close" x-on:click="$store.modals.reauth = false">${icon('x', { size: 14 })}</button>
+          </div>
+          <form hx-post="/admin/api/account/reauth" hx-swap="none"
+                hx-on::after-request="if (event.detail.xhr.status === 200) { $store.modals.reauth = false; setTimeout(()=>window.location.reload(), 900); }">
+            <input type="hidden" name="accountId" value="${esc(detail.accountId)}" />
+            <div class="modal-body">
+              <div class="kv-list">
+                <div class="kv"><span class="k">Account</span><span class="v">${esc(detail.accountId)}</span></div>
+                <div class="kv"><span class="k">Email</span><span class="v">${esc(detail.email)}</span></div>
+              </div>
+              <label class="field">
+                New password
+                <input type="password" name="password" required minlength="6" class="field-input" autocomplete="off" />
+                <span class="hint">
+                  Verified against Seedr before it is saved, so a typo cannot
+                  make things worse. The email stays as-is — to change that,
+                  remove the account and add it again.
+                </span>
+              </label>
+            </div>
+            <div class="modal-foot">
+              <button type="button" class="btn" x-on:click="$store.modals.reauth = false">Cancel</button>
+              <button type="submit" class="primary">${icon('check', { size: 13 })} Verify &amp; save</button>
+            </div>
+          </form>
+        </div>
       </div>
     `;
     return this.#page(detail.accountId, '/admin/accounts', body);
@@ -570,39 +642,17 @@ export class AdminApp {
     const transfers = await this.#getPool().listAllTransfers({ force: true });
     const active = transfers.filter((t) => t.state !== 'finished' && t.state !== 'failed').length;
 
-    const rows = transfers.map((t) => {
-      const dead = isDeadTransfer(t, 999);
-      const pill = t.state === 'finished'
-        ? '<span class="pill ok"><span class="dot"></span>Finished</span>'
-        : dead
-          ? '<span class="pill bad"><span class="dot"></span>No seeders</span>'
-          : t.state === 'failed'
-            ? '<span class="pill bad"><span class="dot"></span>Failed</span>'
-            : `<span class="pill warn"><span class="dot"></span>${esc(t.state)}</span>`;
-      return `<tr>
-        <td class="mono">${esc(t.accountId)}</td>
-        <td>${esc(t.name ?? '(resolving…)')}</td>
-        <td>${pill}</td>
-        <td>
-          <div class="bar-inline">
-            <div class="bar${dead ? ' warn' : ''}"><div class="fill" style="--fill: ${(t.progress / 100).toFixed(4)}"></div></div>
-            <span class="pct">${t.progress}%</span>
-          </div>
-        </td>
-        <td class="mono">${formatBytes(t.size)}</td>
-        <td class="mono" style="color: ${t.seeders > 0 ? 'var(--ok)' : 'var(--text-dim)'};">${t.seeders}</td>
-        <td>
-          <button class="btn btn-sm danger" hx-post="/admin/api/transfer/delete" hx-vals='{"accountId":"${esc(t.accountId)}","transferId":"${esc(t.id)}"}' hx-swap="none" hx-confirm="Remove this transfer from ${esc(t.accountId)}?">${icon('trash-2', { size: 12 })}</button>
-        </td>
-      </tr>`;
-    }).join('');
-
     const body = html`
       <div class="page-head">
         <div class="lead">
           <div class="eyebrow">${icon('arrow-down-up', { size: 11 })} Transfers</div>
           <h1>${active} <span class="accent">in flight</span> <span class="num">· ${transfers.length} total</span></h1>
-          <p class="lede">Per-account view of every magnet currently in flight. "No seeders" pills mean the swarm is dead — remove to free the slot.</p>
+          <p class="lede">
+            Per-account view of every magnet currently in flight. This table
+            refreshes itself every 4 s, so a download's progress moves without
+            you touching anything. "No seeders" means the swarm is dead — remove
+            it to free the slot.
+          </p>
         </div>
         <div class="actions">
           <a class="btn" href="/admin">${icon('arrow-left', { size: 13 })} Overview</a>
@@ -615,30 +665,89 @@ export class AdminApp {
             ${icon('search', { size: 14, className: 'search-icon' })}
             <input type="text" class="search-input" placeholder="Search…" />
           </div>
-          <button class="btn btn-sm" hx-post="/admin/api/reload" hx-swap="none">${icon('refresh-cw', { size: 12 })} Refresh</button>
+          <span class="pill ok live"><span class="dot"></span>Live</span>
         </div>
-        ${transfers.length === 0
-          ? raw(html`
-              <div class="empty">
-                <h3>No transfers</h3>
-                <p>Add a magnet from the overview to start one.</p>
-                <a class="btn primary" href="/admin">Back to overview</a>
-              </div>
-            `)
-          : raw(html`
-              <div class="table-wrap">
-                <table>
-                  <thead><tr>
-                    <th>Account</th><th>Torrent</th><th>State</th><th>Progress</th>
-                    <th>Size</th><th>Peers</th><th></th>
-                  </tr></thead>
-                  <tbody>${raw(rows)}</tbody>
-                </table>
-              </div>
-            `)}
+
+        <!-- Polled fragment. hx-trigger fires on a timer and on the
+             seedrpool:refresh event that client.js dispatches after an
+             action, so the table catches up immediately rather than
+             waiting out the interval. The pool caches the fanout for 5 s,
+             so the poll is nearly free. -->
+        <div id="transfersLive"
+             data-live
+             hx-get="/admin/transfers/table"
+             hx-trigger="every 4s, seedrpool:refresh"
+             hx-swap="innerHTML">
+          ${raw(this.#transfersTable(transfers))}
+        </div>
       </div>
     `;
     return this.#page('Transfers', '/admin/transfers', body);
+  }
+
+  /**
+   * The transfers table on its own, for the polled fragment.
+   *
+   * Returns just the table markup so htmx can swap it into the live region
+   * without re-rendering the page shell.
+   */
+  async transfersTable(): Promise<Response> {
+    // Not forced: the 5 s pool cache is what makes polling cheap. A forced
+    // refresh here would defeat that and hit Seedr once per poll per tab.
+    const transfers = await this.#getPool().listAllTransfers();
+    return htmlResponse(this.#transfersTable(transfers));
+  }
+
+  #transfersTable(transfers: Array<Transfer & { accountId: string }>): string {
+    if (transfers.length === 0) {
+      return `
+        <div class="empty">
+          <h3>No transfers</h3>
+          <p>Add a magnet from the overview to start one. This view will pick it up within a few seconds.</p>
+          <a class="btn primary" href="/admin">Back to overview</a>
+        </div>`;
+    }
+
+    const rows = transfers.map((t) => {
+      const dead = isDeadTransfer(t, 999);
+      const pill = t.state === 'finished'
+        ? '<span class="pill ok"><span class="dot"></span>Finished</span>'
+        : dead
+          ? '<span class="pill bad"><span class="dot"></span>No seeders</span>'
+          : t.state === 'failed'
+            ? '<span class="pill bad"><span class="dot"></span>Failed</span>'
+            : `<span class="pill warn"><span class="dot"></span>${esc(t.state)}</span>`;
+      return `<tr>
+        <td class="mono"><a href="/admin/accounts/${esc(t.accountId)}">${esc(t.accountId)}</a></td>
+        <td>${esc(t.name ?? '(resolving…)')}</td>
+        <td>${pill}</td>
+        <td>
+          <div class="bar-inline">
+            <div class="bar${dead ? ' warn' : ''}"><div class="fill" style="--fill: ${(t.progress / 100).toFixed(4)}"></div></div>
+            <span class="pct">${t.progress}%</span>
+          </div>
+        </td>
+        <td class="mono">${formatBytes(t.size)}</td>
+        <td class="mono" style="color: ${t.seeders > 0 ? 'var(--ok)' : 'var(--text-dim)'};">${t.seeders}</td>
+        <td>
+          <button class="btn btn-sm danger"
+                  hx-post="/admin/api/transfer/delete"
+                  hx-vals='{"accountId":"${esc(t.accountId)}","transferId":"${esc(t.id)}"}'
+                  hx-swap="none">${iconMarkup('trash-2', { size: 12 })}</button>
+        </td>
+      </tr>`;
+    }).join('');
+
+    return `
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Account</th><th>Torrent</th><th>State</th><th>Progress</th>
+            <th>Size</th><th>Peers</th><th></th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
   }
 
   // --------------------------------------------------------------------

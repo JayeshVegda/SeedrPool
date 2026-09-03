@@ -178,10 +178,19 @@ export class AddonApp {
    * This is the only route a media player hits directly. It must stay a redirect
    * rather than a proxy: proxying 4.6 MB/s of video through a 256 MiB container
    * would waste bandwidth and memory for no gain.
+   *
+   * `?download=1` asks the browser to save the file rather than play it
+   * inline. Seedr serves `application/octet-stream` with no
+   * `Content-Disposition`, so a plain link opens a blank tab in some
+   * browsers and streams inline in others. We cannot set a header on the
+   * redirect target — it is Seedr's response, not ours — but appending
+   * Seedr's own `filename` hint to the URL makes the CDN send the
+   * attachment disposition. The admin's Download buttons use this.
    */
   async play(ctx: RouteContext): Promise<Response> {
     const accountId = ctx.params['accountId'] ?? '';
     const fileId = ctx.params['fileId'] ?? '';
+    const wantsDownload = ctx.url.searchParams.get('download') === '1';
 
     const provider = this.#pool().provider(accountId);
     if (!provider) return new Response('unknown account', { status: 404 });
@@ -204,8 +213,13 @@ export class AddonApp {
       } else {
         this.#pool().markCdnHealthy(accountId);
       }
+
+      const target = wantsDownload
+        ? withAttachmentHint(playback.url, playback.filename)
+        : playback.url;
+
       // 302 rather than 301: the URL expires, so it must never be cached.
-      return redirect(playback.url, 302);
+      return redirect(target, 302);
     } catch (err) {
       console.error(
         `play ${accountId}/${fileId} failed:`,
@@ -384,6 +398,33 @@ export class AddonApp {
         bingeGroup,
       },
     };
+  }
+}
+
+/**
+ * Adds Seedr's download-filename hint to a playback URL.
+ *
+ * Seedr's `ff_get` endpoint accepts a `filename` query parameter and echoes
+ * it back as `Content-Disposition: attachment`, which is the only lever we
+ * have: the bytes come from Seedr's CDN, so we cannot attach a header of our
+ * own to a 302 target.
+ *
+ * An HLS manifest is left untouched — a `.m3u8` is a playlist, and asking the
+ * browser to save it yields a text file rather than a video.
+ */
+export function withAttachmentHint(url: string, filename: string): string {
+  if (filename === '') return url;
+  if (url.includes('.m3u8')) return url;
+  try {
+    const parsed = new URL(url);
+    // Do not clobber a hint Seedr already set.
+    if (parsed.searchParams.has('filename')) return url;
+    parsed.searchParams.set('filename', filename);
+    return parsed.toString();
+  } catch {
+    // A malformed URL is Seedr's problem, not ours; hand it back untouched
+    // rather than failing the download outright.
+    return url;
   }
 }
 

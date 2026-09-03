@@ -140,21 +140,43 @@
         if (data.failures && data.failures.length > 0) {
           for (const f of data.failures) showToast('bad', 'Ingest failed', f.error);
         }
-        // Reset form and refresh table after ingest
+        // Clear the textarea so a second paste does not re-queue the first.
         if (e.target && e.target.tagName === 'FORM') {
           try { e.target.reset(); } catch (_) {}
         }
-        setTimeout(() => {
-          if (window.location.pathname === '/admin' || window.location.pathname === '/admin/transfers') {
-            window.location.reload();
-          }
-        }, 1200);
+        // Deliberately no page reload here. A reload would destroy the toast
+        // the user is meant to read, which is the exact failure mode this
+        // whole path replaced. The transfers table polls itself instead.
+        refreshLiveRegions();
+      } else if (data.reauthed) {
+        showToast('ok', `Password updated for ${data.accountId}`, 'Verified against Seedr and saved');
+      } else if (data.scope === 'account') {
+        // Per-account reindex is awaited server-side, so it reports real counts.
+        showToast(
+          'ok',
+          `Reindexed ${data.accountId}`,
+          `${data.videos} video${data.videos === 1 ? '' : 's'}, ` +
+          `${data.subtitles} subtitle${data.subtitles === 1 ? '' : 's'}` +
+          (data.pruned > 0 ? `, ${data.pruned} pruned` : ''),
+        );
+      } else if (data.scope === 'all') {
+        showToast('info', 'Reindex started', 'Scanning every account in the background');
       } else if (data.accountId) {
         // Account CRUD.
         const verb = e.target.dataset.toastVerb || 'Done';
         showToast('ok', `${verb} ${data.accountId}`, data.email || '');
       } else if (data.written !== undefined) {
-        showToast(data.errors > 0 ? 'warn' : 'ok', 'Dump complete', `${data.written} written, ${data.errors} errors`);
+        // A dump can succeed at writing files while those files are missing
+        // sections, so the two counts are reported separately: "8 written"
+        // with zeros in every file was the bug that hid a broken capture.
+        const parts = [`${data.written} written`];
+        if (data.incomplete > 0) parts.push(`${data.incomplete} incomplete`);
+        if (data.errors > 0) parts.push(`${data.errors} failed`);
+        showToast(
+          data.errors > 0 ? 'bad' : data.incomplete > 0 ? 'warn' : 'ok',
+          'Dump complete',
+          parts.join(', '),
+        );
       } else if (data.reloaded) {
         showToast('ok', 'Pool reloaded');
       } else if (data.started) {
@@ -186,6 +208,26 @@
   document.addEventListener('htmx:afterSwap', () => {
     // Alpine processes new DOM on the next microtask; nothing to do here.
   });
+
+  // -------------------------------------------------------------------
+  // Live regions.
+  //
+  // Anything marked `data-live` re-fetches itself from the server on a
+  // timer via htmx. The transfers table uses this: previously you added a
+  // torrent, got a toast, and then had to refresh by hand to watch it
+  // progress. Polling is cheap because the pool caches the transfer fanout
+  // for 5s, so ten browser tabs still cost one Seedr round-trip.
+  //
+  // `refreshLiveRegions` forces an immediate poll, used right after an
+  // action so the table reflects it without waiting for the next tick.
+  // -------------------------------------------------------------------
+  function refreshLiveRegions() {
+    if (!window.htmx) return;
+    document.querySelectorAll('[data-live]').forEach((el) => {
+      try { window.htmx.trigger(el, 'seedrpool:refresh'); } catch (_) {}
+    });
+  }
+  window.refreshLiveRegions = refreshLiveRegions;
 
   // -------------------------------------------------------------------
   // Library view mode persistence.
@@ -304,6 +346,7 @@
 
     A.store('modals', {
       add: false,
+      reauth: false,
       confirm: null, // { verb, body, action, accountId?, fileId? }
       shortcuts: false,
     });
@@ -322,6 +365,7 @@
         document.addEventListener('seedrpool:close-modals', () => {
           const m = A.store('modals');
           m.add = false;
+          m.reauth = false;
           m.confirm = null;
           m.shortcuts = false;
         });

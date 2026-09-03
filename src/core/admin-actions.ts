@@ -75,6 +75,13 @@ export interface DumpResult {
   written: number;
   errors: number;
   errorMessages: string[];
+  /**
+   * Dumps that were written but are missing a section. Distinct from
+   * `errors`: the file exists and records why the section failed, but its
+   * numbers are not the account's real state.
+   */
+  incomplete: number;
+  incompleteMessages: string[];
 }
 
 export interface AccountReauthResult {
@@ -287,6 +294,65 @@ export class AdminActions {
     return ok(result);
   }
 
+  /**
+   * Replaces the password for an existing account.
+   *
+   * This is the recovery path for an account whose credentials went bad —
+   * previously the only fix was hand-editing the credentials file on the
+   * host, even though the admin already surfaced `needsReauth`.
+   *
+   * The replacement is **in place**. Account ids are positional (line 1 is
+   * `acc1`) and the library index stores those ids, so a delete-then-append
+   * would renumber every account after this one and silently orphan their
+   * library rows. `writeCredentials` is given the same array with one
+   * element's password swapped.
+   *
+   * The new password is verified against Seedr before anything is written,
+   * so a typo cannot lock the account out worse than it already is.
+   */
+  async reauthAccount(ctx: RouteContext): Promise<Response> {
+    const form = await ctx.request.formData();
+    const accountId = String(form.get('accountId') ?? '').trim();
+    const password = String(form.get('password') ?? '').trim();
+    if (!accountId) return bad('Missing accountId.');
+    if (!password) return bad('Password required.');
+
+    const credentials = this.#getCredentials();
+    const index = credentials.accounts.findIndex((a) => a.id === accountId);
+    if (index === -1) return bad(`Account ${accountId} not found.`, 404);
+    const existing = credentials.accounts[index];
+    if (existing === undefined) return bad(`Account ${accountId} not found.`, 404);
+
+    // Verify before persisting. A fresh provider instance is used so the
+    // pool's cached (rejected) credentials do not short-circuit the probe:
+    // SeedrV1Provider latches `#credentialsRejected` after a bad password
+    // and refuses to retry, which is correct for the pool and wrong here.
+    const probe = new SeedrV1Provider({ id: '__reauth__', email: existing.email, password });
+    try {
+      const health = await probe.healthCheck();
+      if (!health.healthy) {
+        return bad(`Seedr rejected this password: ${health.reason ?? 'unknown reason'}`);
+      }
+    } catch (err) {
+      return bad(`Seedr login failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    const updated = credentials.accounts.map((a, i) =>
+      i === index ? { ...a, password } : a,
+    );
+    try {
+      await writeCredentials(this.#credentialsPath, updated);
+    } catch (err) {
+      return bad(`Failed to write credentials: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // Never log the password, only that it changed.
+    this.#getLibrary().recordActivity('success', `Password updated for ${accountId}`, existing.email);
+    await this.#onAccountsChanged();
+    const result: AccountReauthResult = { accountId, reauthed: true, reason: null };
+    return ok(result);
+  }
+
   async runDump(): Promise<Response> {
     const r = await this.#runDump();
     return ok(r);
@@ -300,7 +366,45 @@ export class AdminActions {
   async reindex(): Promise<Response> {
     void this.#indexer.scanAll().then(() => this.#enricher.tick());
     this.#getLibrary().recordActivity('info', 'Reindex started');
-    return ok({ started: true });
+    return ok({ started: true, scope: 'all' });
+  }
+
+  /**
+   * Reindexes a single account.
+   *
+   * The account detail page's "Reindex this account" button used to post to
+   * the pool-wide endpoint, so it rescanned all eight accounts and the label
+   * was a lie. Scoping it matters more as the pool grows: at 50 accounts a
+   * full scan is 50 folder walks to refresh one.
+   */
+  async reindexAccount(ctx: RouteContext): Promise<Response> {
+    const accountId = ctx.params['accountId'] ?? '';
+    if (!accountId) return bad('Missing accountId.');
+    const provider = this.#getPool().provider(accountId);
+    if (!provider) return bad(`Unknown account ${accountId}.`, 404);
+    // Awaited rather than fire-and-forget: the caller asked about one
+    // account, so the counts are worth reporting back in the toast.
+    try {
+      const result = await this.#indexer.scanAccount(provider);
+      void this.#enricher.tick();
+      if (result.error !== undefined) {
+        return bad(`Scan failed on ${accountId}: ${result.error}`);
+      }
+      this.#getLibrary().recordActivity(
+        'info',
+        `Reindexed ${accountId}`,
+        `${result.videos} videos, ${result.subtitles} subtitles, ${result.pruned} pruned`,
+      );
+      return ok({
+        accountId,
+        scope: 'account',
+        videos: result.videos,
+        subtitles: result.subtitles,
+        pruned: result.pruned,
+      });
+    } catch (err) {
+      return bad(err instanceof Error ? err.message : String(err));
+    }
   }
 
   async enrichAll(): Promise<Response> {
