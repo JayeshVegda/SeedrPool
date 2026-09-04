@@ -20,8 +20,6 @@ export interface Config {
    * This is the live source of the pool's membership.
    */
   credentialsPath: string;
-  /** Path to the legacy V2 rotating-token env file, kept as a fallback. */
-  tokenPath: string;
   /** SQLite database path. */
   databasePath: string;
   /**
@@ -55,7 +53,6 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
   const secretsDir = env['SEEDRPOOL_SECRETS_DIR'] ?? DEFAULT_SECRETS_DIR;
   const credentialsPath =
     env['SEEDRPOOL_CREDENTIALS_PATH'] ?? join(secretsDir, 'seedrpool-credentials.txt');
-  const tokenPath = env['SEEDRPOOL_TOKEN_PATH'] ?? join(secretsDir, 'seedrpool-accounts.env');
   const databasePath = env['SEEDRPOOL_DB_PATH'] ?? '/opt/stacks/sites/seedrpool/data/library.sqlite';
   const dumpsDir = env['SEEDRPOOL_DUMPS_DIR'] ?? '/app/data/dumps';
   const secretPath =
@@ -67,7 +64,6 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
     port: Number(env['SEEDRPOOL_PORT'] ?? 7010),
     host: env['SEEDRPOOL_HOST'] ?? '127.0.0.1',
     credentialsPath,
-    tokenPath,
     databasePath,
     dumpsDir,
     addonSecret,

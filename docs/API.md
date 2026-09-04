@@ -150,6 +150,16 @@ If the underlying CDN is unreachable (the "torn reel" case) the
 endpoint returns a 302 to the file's HLS playlist from
 `presentation_urls.video.hls` instead.
 
+**Rate limited: 30 requests per minute per client.** This is the only
+unauthenticated route that mints a real CDN URL, and its path is enumerable —
+account ids are `acc1..accN` and Seedr file ids are dense integers — so anyone
+holding the manifest URL could otherwise walk the whole library, spending one
+Seedr API call per attempt against that account's rate budget. Exceeding the
+limit returns `429` with a `Retry-After` header. The budget is a token bucket
+that refills continuously, so a burst of stream starts is fine and only a
+sustained sweep is refused. The client is identified by `X-Real-IP`, then the
+first `X-Forwarded-For` entry, then the TCP peer.
+
 ## Operator console (admin)
 
 All `/admin/*` routes require HTTP basic auth. The realm string in

@@ -23,6 +23,10 @@
  * making per-page latency `accounts × 250ms`. That is pure self-inflicted
  * latency: the gap exists to avoid bursting one account, and requests to
  * different accounts do not burst anything.
+ *
+ * Not to be confused with `core/request-limiter.ts`, which limits *inbound*
+ * requests from clients on the public playback route. This one paces our
+ * *outbound* requests to Seedr.
  */
 
 /** Minimum spacing between outbound API requests *on the same account*. */
@@ -146,11 +150,3 @@ export class RateLimiter {
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-
-/**
- * Process-wide limiter.
- *
- * Shared so the cooldown is global, while the per-account lanes inside it keep
- * healthy accounts from queueing behind each other.
- */
-export const seedrRateLimiter = new RateLimiter();

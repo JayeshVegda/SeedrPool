@@ -9,7 +9,6 @@ const config: Config = {
   port: 0,
   host: '127.0.0.1',
   credentialsPath: '/dev/null',
-  tokenPath: '/dev/null',
   databasePath: '/dev/null',
   addonSecret: 'testsecret',
   publicUrl: 'https://example.test',

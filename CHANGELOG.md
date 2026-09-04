@@ -3,6 +3,37 @@
 All notable changes to SeedrPool are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## 0.3.1 — 2026-09-04
+
+### Security
+
+* **Rate-limited `/{secret}/play/:accountId/:fileId`** at 30 requests per
+  minute per client. It is the only route that must stay unauthenticated —
+  Stremio's player cannot send a basic-auth header — and it is also the only
+  one that mints a real Seedr CDN URL. The path is enumerable (`acc1..accN`
+  plus dense integer file ids), so anyone holding the manifest URL could walk
+  the entire library, spending one Seedr API call per attempt against that
+  account's rate budget. A token bucket rather than a fixed window, so a burst
+  of stream starts still works and only a sustained sweep is refused. The
+  tracked-client map is capped to bound memory, since an unauthenticated
+  endpoint keyed by address is otherwise a memory-exhaustion vector.
+* The peer address header the limiter falls back to is stripped from inbound
+  requests before routing, so a client cannot spoof its own identity.
+
+### Removed
+
+* **The V2 provider, its device-flow onboarding, and the rotating token
+  store** — about 950 lines that could not run. Seedr refuses new
+  authorizations for the public client id, which RESEARCH.md has documented
+  since 0.1.0, so this was dead weight that would mislead anyone debugging
+  auth. `makeQuota` moved to `providers/shared.ts`, where the V1 provider
+  already imported it from. `describeError` and `retryAfterSeconds` had no
+  remaining callers and went with it, as did the now-unused
+  `seedrRateLimiter` singleton and the `SEEDRPOOL_TOKEN_PATH` config.
+
+  Removing this drops 4 test files whose only subject was the deleted code.
+  Net test count is up (362 from 389 minus 51 V2-only tests, plus 24 new).
+
 ## 0.3.0 — 2026-09-04
 
 ### Fixed

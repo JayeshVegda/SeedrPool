@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg?style=flat)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-24-339933.svg?style=flat&logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178c6.svg?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Tests](https://img.shields.io/badge/Tests-246-brightgreen.svg?style=flat)](tests)
+[![Tests](https://img.shields.io/badge/Tests-362-brightgreen.svg?style=flat)](tests)
 [![Stremio](https://img.shields.io/badge/For-Stremio-7b5bf5.svg?style=flat)](https://stremio.com)
 [![Dependencies](https://img.shields.io/badge/Runtime_deps-0-22c55e.svg?style=flat)](package.json)
 
@@ -125,12 +125,13 @@ SeedrPool/
 │   ├── addon/           Stremio addon endpoints (manifest, catalog,
 │   │                    meta, stream, subtitles, play)
 │   ├── admin/           basic-auth operator console + html tagged template
-│   ├── core/            pool, watcher, router, rate-limiter, config,
-│   │                    credentials, token-store, types
+│   ├── core/            pool, watcher, router, rate-limiter (outbound),
+│   │                    request-limiter (inbound), config, credentials,
+│   │                    admin-actions, admin-views, assets, dumper, types
 │   ├── library/         indexer, parser, store, enricher, TMDB client
-│   ├── providers/       seedr-v1 (the only viable path), seedr-v2 (legacy)
+│   ├── providers/       seedr-v1 (the only viable path) + shared errors
 │   └── index.ts         wiring: pool, indexer, enricher, watcher, server
-├── tests/               mirrors src/ subdirs; 246 tests across 15 files
+├── tests/               mirrors src/ subdirs
 │   ├── addon/
 │   ├── admin/
 │   ├── core/
@@ -155,7 +156,7 @@ SeedrPool/
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # vitest run (246 tests)
+npm test            # vitest run
 npm test:watch      # vitest (re-runs on change)
 npm run build       # tsc → dist/
 npm start           # node dist/index.js

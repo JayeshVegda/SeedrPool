@@ -1,8 +1,11 @@
 /**
- * Error types and helpers shared by the Seedr V1 and V2 providers.
+ * Error types and helpers shared by the Seedr provider layer.
  *
- * These live outside both provider files because the two APIs are otherwise
- * independent: V1 must not import from V2 just to reuse an error class.
+ * These live outside the provider file so the pool, the admin, and the tests
+ * can catch a `RateLimitError` without importing Seedr's endpoint knowledge.
+ * Only V1 remains — V2 was deleted once Seedr stopped authorizing new device
+ * grants — but the split is still the right shape: `AccountPool` branches on
+ * these error names and must not depend on a specific API version.
  */
 
 import type { Quota } from '../core/types.ts';
@@ -49,21 +52,4 @@ export function parseExpiry(url: string): number | null {
   } catch {
     return null;
   }
-}
-
-/** Builds a readable message from Seedr's inconsistent error shapes. */
-export function describeError(data: Record<string, unknown>): string {
-  for (const key of ['reason_phrase', 'error_description', 'error', 'message']) {
-    const value = data[key];
-    if (typeof value === 'string' && value !== '') return value;
-  }
-  return 'unknown error';
-}
-
-/** Reads a `Retry-After` header, when the server provides one. */
-export function retryAfterSeconds(res: Response): number | undefined {
-  const header = res.headers.get('retry-after');
-  if (!header) return undefined;
-  const seconds = Number(header);
-  return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
 }

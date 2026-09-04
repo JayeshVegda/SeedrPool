@@ -230,9 +230,11 @@ different one.
 Date: 2026-08-31
 Confidence: measured
 
-This section applies to the **V2** provider, which is no longer in use. It is
-retained because it explains why `src/core/token-store.ts` is built the way it is,
-and because it is the failure mode to remember if V2 is ever revisited.
+This section applies to the **V2** provider, whose code was deleted in 0.3.0
+(Seedr refuses new authorizations for the public client id, so it could not be
+used regardless). The measurement is retained because it is the failure mode to
+remember if V2 is ever revisited: any re-implementation needs a persisted,
+serialized token store, which is what the deleted `token-store.ts` was for.
 
 ```text
 POST /oauth/token grant_type=refresh_token

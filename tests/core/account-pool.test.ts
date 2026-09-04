@@ -6,7 +6,7 @@ import {
   isDeadTransfer,
   type AccountPoolEntry,
 } from '../../src/core/account-pool.ts';
-import { makeQuota } from '../../src/providers/seedr-v2.ts';
+import { makeQuota } from '../../src/providers/shared.ts';
 import type { FolderContents, PlaybackUrl, Quota, StorageProvider, Transfer } from '../../src/core/types.ts';
 
 /** Minimal in-memory provider so pool logic is tested without network access. */

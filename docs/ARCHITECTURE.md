@@ -127,13 +127,14 @@ src/
   addon/        Stremio addon endpoints (manifest, catalog, meta,
                 stream, subtitles, play) — IMDb id identity
   admin/        basic-auth operator console
-  core/         pool, watcher, router, rate-limiter, config,
-                credentials, token-store, types
+  core/         pool, watcher, router, rate-limiter (outbound to Seedr),
+                request-limiter (inbound on /play), config, credentials,
+                admin-actions, admin-views, assets, dumper, types
   library/      indexer, parser, store, enricher, TMDB client
-  providers/    seedr-v1 (the only viable path), seedr-v2 (legacy)
+  providers/    seedr-v1 (the only viable path), shared errors
   index.ts      wiring: pool, indexer, enricher, watcher, router, server
 
-tests/         mirrors src/ subdirs; 246 tests across 15 files
+tests/         mirrors src/ subdirs
 docs/          research notes, this file, INSTALL, OPERATIONS, API
 assets/        logo, architecture diagram (inline SVG, no scripts)
 .github/       CI workflow (typecheck + tests)
@@ -149,6 +150,8 @@ assets/        logo, architecture diagram (inline SVG, no scripts)
   candidates. It does not copy the file between accounts to free up
   space. (It does provide a "purge" action on the fleet page that deletes
   the Seedr-side file and the library row for one account.)
-* **Token rotation and v2 onboarding.** v2 device flow is a vestigial
-  path that exists only for the legacy token-store; new deployments
-  use v1 exclusively.
+* **The v2 API and its device flow.** Seedr refuses new authorizations for
+  the public client id, so v2 could not be used even if we wanted to. The
+  provider, its onboarding flow, and the rotating token-store were deleted
+  in 0.3.0 rather than left as ~950 lines of code that cannot run and would
+  mislead anyone debugging auth. See RESEARCH.md for the measurements.

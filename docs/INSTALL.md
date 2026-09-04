@@ -25,7 +25,6 @@ services:
       - "127.0.0.1:7010:7010"                # only on loopback
     environment:
       SEEDRPOOL_CREDENTIALS_PATH: /secrets/seedrpool-credentials.txt
-      SEEDRPOOL_TOKEN_PATH:        /secrets/seedrpool-accounts.env
       SEEDRPOOL_ADDON_SECRET_PATH: /secrets/seedrpool-addon-secret
       SEEDRPOOL_DB_PATH:           /opt/stacks/sites/seedrpool/data/library.sqlite
       SEEDRPOOL_PUBLIC_URL:        https://seedr.zayu.dev
@@ -34,7 +33,6 @@ services:
       SEEDRPOOL_TMDB_API_KEY:      your-tmdb-v3-key
     volumes:
       - /opt/stacks/.secrets/seedrpool-credentials.txt:/secrets/seedrpool-credentials.txt:ro
-      - /opt/stacks/.secrets/seedrpool-accounts.env:/secrets/seedrpool-accounts.env:ro
       - /opt/stacks/.secrets/seedrpool-addon-secret:/secrets/seedrpool-addon-secret:ro
       - seedrpool-data:/opt/stacks/sites/seedrpool/data
     healthcheck:
@@ -102,15 +100,14 @@ build.
 
 ## Required secret files
 
-Three files must exist on disk and be readable by the process:
+Two files must exist on disk and be readable by the process:
 
 | File | Format | Used by |
 | --- | --- | --- |
 | `seedrpool-credentials.txt` | one `email:password` per line, slot N → `accN`; a `#deleted accN` line is a tombstone holding a retired slot | `SeedrV1Provider` |
-| `seedrpool-accounts.env` | `KEY=VALUE` (legacy v2 token-store) | legacy path, optional |
 | `seedrpool-addon-secret` | single line, any URL-safe string | Stremio addon URL prefix |
 
-**File permissions matter.** All three should be `chmod 600` and owned by
+**File permissions matter.** Both should be `chmod 600` and owned by
 the user that runs the container (`uid 1000` for the bundled image). The
 container is configured to drop root and run as `node:node`, which is uid
 `1000`.
@@ -151,7 +148,6 @@ matcher. The Stremio addon secret itself is the only access control.
 | `SEEDRPOOL_HOST` | `0.0.0.0` | bind address inside container |
 | `SEEDRPOOL_PORT` | `7010` | bind port |
 | `SEEDRPOOL_CREDENTIALS_PATH` | `/secrets/seedrpool-credentials.txt` | per-account login |
-| `SEEDRPOOL_TOKEN_PATH` | `/secrets/seedrpool-accounts.env` | legacy v2 token cache |
 | `SEEDRPOOL_ADDON_SECRET_PATH` | `/secrets/seedrpool-addon-secret` | addon URL prefix |
 | `SEEDRPOOL_DB_PATH` | `/app/data/library.sqlite` | sqlite file |
 | `SEEDRPOOL_PUBLIC_URL` | — | canonical public URL (used in addon manifest) |

@@ -22,6 +22,12 @@ import { Dumper } from './core/dumper.ts';
 import { AdminViews } from './core/admin-views.ts';
 import { AdminActions, type DumpResult } from './core/admin-actions.ts';
 import { buildAdminAssets, assetList } from './core/assets.ts';
+import {
+  playbackLimiter,
+  clientKey,
+  tooManyRequests,
+  PEER_ADDRESS_HEADER,
+} from './core/request-limiter.ts';
 import { STYLES_BODY, layout } from './admin/html.ts';
 import { type AccountStatus } from './core/account-pool.ts';
 import { NoCapacityError } from './core/account-pool.ts';
@@ -192,7 +198,16 @@ const router = new Router()
   .get(`${addonPath}/meta/:type/:id`, (ctx) => addon.meta(ctx), { cors: true })
   .get(`${addonPath}/stream/:type/:id`, (ctx) => addon.stream(ctx), { cors: true })
   .get(`${addonPath}/subtitles/:type/:id`, (ctx) => addon.subtitles(ctx), { cors: true })
-  .get(`${addonPath}/play/:accountId/:fileId`, (ctx) => addon.play(ctx))
+  // Rate-limited: this is the only unauthenticated route that mints a real
+  // Seedr CDN URL, and the path is enumerable (`accN` plus a dense file id).
+  // Without a limit, anyone holding the manifest URL could walk the whole
+  // library, spending one Seedr API call per attempt against that account's
+  // budget. 30/min per client is far above real playback and far below a sweep.
+  .get(`${addonPath}/play/:accountId/:fileId`, (ctx) => {
+    const decision = playbackLimiter.check(clientKey(ctx.request));
+    if (!decision.allowed) return tooManyRequests(decision);
+    return addon.play(ctx);
+  })
   .get(`${addonPath}/poster/:key`, (ctx) => addon.poster(ctx), { cors: true })
   .get(`${addonPath}/logo.png`, () => addon.logo(), { cors: true });
 
@@ -214,9 +229,18 @@ router.post('/admin/transfers/delete', (ctx) => actions.deleteTransfer(ctx));
 const server = createServer(async (req, res) => {
   const url = `http://${req.headers.host ?? 'localhost'}${req.url ?? '/'}`;
   const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : await readBody(req);
+
+  // Record the TCP peer for the request limiter, overwriting anything a client
+  // sent under that name so it cannot be spoofed. Caddy's X-Real-IP is
+  // preferred when present; this is the fallback for direct connections.
+  const headers = { ...req.headers } as Record<string, string>;
+  delete headers[PEER_ADDRESS_HEADER];
+  const peer = req.socket.remoteAddress;
+  if (peer !== undefined) headers[PEER_ADDRESS_HEADER] = peer;
+
   const request = new Request(url, {
     method: req.method ?? 'GET',
-    headers: req.headers as Record<string, string>,
+    headers,
     ...(body !== undefined ? { body } : {}),
   });
 
