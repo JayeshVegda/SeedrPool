@@ -1310,24 +1310,48 @@ td.mono, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nu
 `;
 
 /**
- * The sonner-js ESM bundle's documented entry point.
+ * Script tags for the admin console.
  *
- * Loading via ESM at the import site lets the browser cache it across page
- * loads, which is the whole point of the static-asset rewrite. We pin to the
- * same version tested in the original deploy.
+ * Two bugs lived here and both silently disabled most of the UI:
+ *
+ * 1. sonner-js was imported as `{ toast }`. The bundle only has a DEFAULT
+ *    export, so the named import threw a SyntaxError, `window.toast` was
+ *    never assigned, and every toast in the app degraded to a
+ *    `console.log`. Every success and every error message was invisible.
+ *
+ * 2. Alpine and client.js were both plain `defer` scripts, with Alpine
+ *    first. Alpine's CDN build ends with `queueMicrotask(() =>
+ *    Alpine.start())`, and a microtask checkpoint runs between two deferred
+ *    scripts — so Alpine had already started and fired `alpine:init` before
+ *    client.js got a chance to add its listener. `Alpine.store('modals')`
+ *    and `Alpine.data('seedrpool')` never registered, which made
+ *    `$store.modals` undefined and broke every modal and every
+ *    confirm-gated destructive action.
+ *
+ * The fix for (2) is ordering: client.js is loaded BEFORE Alpine so its
+ * `alpine:init` listener is installed first. client.js also handles the
+ * already-started case defensively, so the order here is belt and braces.
+ *
+ * All three libraries are served from our own origin (see core/assets.ts)
+ * rather than jsdelivr, so a blocked CDN can no longer leave the console
+ * with no interactivity.
  */
-const SONNER_VERSION = '1.1.3';
-const HTMX_VERSION = '2.0.4';
-const ALPINE_VERSION = '3.14.8';
-
-export function scriptTags(): string {
+export function scriptTags(options: {
+  htmxPath: string;
+  alpinePath: string;
+  sonnerPath: string;
+  jsPath: string;
+}): string {
   return `
 <script type="module">
-  import { toast } from 'https://cdn.jsdelivr.net/npm/sonner-js@${SONNER_VERSION}/+esm';
+  // Default export, not named. See the note above.
+  import toast from '${esc(options.sonnerPath)}';
   window.toast = toast;
+  window.dispatchEvent(new CustomEvent('seedrpool:toast-ready'));
 </script>
-<script src="https://cdn.jsdelivr.net/npm/htmx.org@${HTMX_VERSION}/dist/htmx.min.js" defer></script>
-<script src="https://cdn.jsdelivr.net/npm/alpinejs@${ALPINE_VERSION}/dist/cdn.min.js" defer></script>
+<script src="${esc(options.htmxPath)}" defer></script>
+<script src="${esc(options.jsPath)}" defer></script>
+<script src="${esc(options.alpinePath)}" defer></script>
 `.trim();
 }
 
@@ -1348,6 +1372,9 @@ export interface LayoutOptions {
   activeTransfers?: number;
   cssPath: string;
   jsPath: string;
+  htmxPath: string;
+  alpinePath: string;
+  sonnerPath: string;
   /** x-init body to run after Alpine is ready, used by pages for local state. */
   pageInit?: string;
 }
@@ -1446,8 +1473,12 @@ export function layout(options: LayoutOptions): string {
   </div>
 </div>
 
-${scriptTags()}
-<script src="${esc(options.jsPath)}" defer></script>
+${scriptTags({
+  htmxPath: options.htmxPath,
+  alpinePath: options.alpinePath,
+  sonnerPath: options.sonnerPath,
+  jsPath: options.jsPath,
+})}
 </body>
 </html>`;
 }

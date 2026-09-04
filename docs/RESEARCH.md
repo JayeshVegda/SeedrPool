@@ -548,10 +548,14 @@ this risk is gone, but a third-party addon would still consume the accounts'
 download-connection budget.
 
 **Credentials file.** `/opt/stacks/.secrets/seedrpool-credentials.txt`, mode 0600,
-owned by uid 1000 to match the container's `node` user. Positional ids mean the
-file is **append-only**: deleting or reordering a line renumbers every account
-below it, and the library index stores account ids. `data.txt` in the repo is
-gitignored; the deployed copy is the one that matters.
+owned by uid 1000 to match the container's `node` user. Ids are positional, so a
+slot number must never be reused: the library index stores account ids, and
+renumbering silently reattributes one account's file rows to another. Deleting an
+account through the admin therefore writes a `#deleted accN` **tombstone** in its
+place, which the parser counts as a consumed slot. Editing the file by hand is
+still unsafe — remove a line and everything below it shifts up. Use the admin, or
+replace the line with a tombstone yourself. `data.txt` in the repo is gitignored;
+the deployed copy is the one that matters.
 
 SeedrPool is excluded from Watchtower so updates are deliberate and a restart
 never lands mid-download.

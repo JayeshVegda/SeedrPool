@@ -71,7 +71,10 @@ npm run build
 
 Add one Seedr account per line of `seedrpool-credentials.txt`. There is no
 hardcoded maximum — the pool is a Map. 8 is the seedr.zayu.dev deploy,
-50 is comfortable, 100 is fine if your Seedr V1 quota holds.
+50 is comfortable, 100 is fine if your Seedr V1 quota holds. Account ids come
+from line position (`accN`), so remove accounts through the admin rather than by
+hand: it leaves a `#deleted accN` tombstone that stops the accounts below from
+being renumbered out from under the library index.
 
 Set up the secrets:
 
@@ -141,7 +144,7 @@ SeedrPool/
 ├── assets/              inline SVG logo + architecture diagram
 ├── .github/workflows/   CI (typecheck + tests)
 ├── Dockerfile           multi-stage, runtime image has no toolchain
-├── package.json         zero runtime dependencies
+├── package.json         one runtime dependency (parse-torrent-title)
 ├── tsconfig.json        strict mode + noUncheckedIndexedAccess
 ├── LICENSE              MIT
 ├── CONTRIBUTING.md      what the operator will and won't accept

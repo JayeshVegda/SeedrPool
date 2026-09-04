@@ -18,21 +18,19 @@
 
 import type { AccountPool, AccountStatus } from '../core/account-pool.ts';
 import type { Transfer } from '../core/types.ts';
-import { NoCapacityError } from '../core/account-pool.ts';
 import type { Config } from '../core/config.ts';
 import type { CredentialFile } from '../core/credentials.ts';
 import { esc, formatBytes, html, layout, raw, icon } from './html.ts';
 import { iconMarkup } from './icons.ts';
-import { htmlResponse, json, type RouteContext } from '../core/router.ts';
+import { htmlResponse, type RouteContext } from '../core/router.ts';
 import type { LibraryStore, TitleSummary } from '../library/store.ts';
 import { AdminViews, type AccountCard, type AccountDetail, type LibraryCard } from '../core/admin-views.ts';
 import { AdminActions, type DumpResult } from '../core/admin-actions.ts';
 import { magnetDisplayName } from './magnet-name.ts';
-import { writeCredentials } from '../core/credentials.ts';
 import { SeedrV1Provider } from '../providers/seedr-v1.ts';
-import type { AccountCredential } from '../core/credentials.ts';
 import type { Indexer } from '../library/indexer.ts';
 import type { MetadataEnricher } from '../library/metadata-enricher.ts';
+import type { AdminAssets } from '../core/assets.ts';
 
 const RAW = Symbol('raw');
 interface RawBody { [RAW]: string }
@@ -53,8 +51,7 @@ export class AdminApp {
   #actions: AdminActions;
   #indexer: Indexer;
   #enricher: MetadataEnricher;
-  #cssPath: string;
-  #jsPath: string;
+  #assets: AdminAssets;
   #runDump: () => Promise<DumpResult>;
 
   constructor(deps: {
@@ -67,8 +64,7 @@ export class AdminApp {
     enricher: MetadataEnricher;
     actions: AdminActions;
     views: AdminViews;
-    cssPath: string;
-    jsPath: string;
+    assets: AdminAssets;
     runDump: () => Promise<DumpResult>;
   }) {
     this.#getPool = deps.getPool;
@@ -80,8 +76,7 @@ export class AdminApp {
     this.#enricher = deps.enricher;
     this.#actions = deps.actions;
     this.#views = deps.views;
-    this.#cssPath = deps.cssPath;
-    this.#jsPath = deps.jsPath;
+    this.#assets = deps.assets;
     this.#runDump = deps.runDump;
   }
 
@@ -96,8 +91,11 @@ export class AdminApp {
       title,
       activeNav,
       body: bodyStr,
-      cssPath: this.#cssPath,
-      jsPath: this.#jsPath,
+      cssPath: this.#assets.css.path,
+      jsPath: this.#assets.js.path,
+      htmxPath: this.#assets.htmx.path,
+      alpinePath: this.#assets.alpine.path,
+      sonnerPath: this.#assets.sonner.path,
       pageInit: pageInit ?? '',
     }));
   }
@@ -717,7 +715,7 @@ export class AdminApp {
           : t.state === 'failed'
             ? '<span class="pill bad"><span class="dot"></span>Failed</span>'
             : `<span class="pill warn"><span class="dot"></span>${esc(t.state)}</span>`;
-      return `<tr>
+      return `<tr data-transfer-row="${esc(t.accountId)}/${esc(t.id)}">
         <td class="mono"><a href="/admin/accounts/${esc(t.accountId)}">${esc(t.accountId)}</a></td>
         <td>${esc(t.name ?? '(resolving…)')}</td>
         <td>${pill}</td>
@@ -768,7 +766,7 @@ export class AdminApp {
           : c.status.healthy
             ? '<span class="pill ok live"><span class="dot"></span>Healthy</span>'
             : '<span class="pill off"><span class="dot"></span>Offline</span>';
-      return `<tr>
+      return `<tr data-account-row="${esc(c.accountId)}">
         <td><a class="mono" style="font-weight:600; color:var(--text);" href="/admin/accounts/${esc(c.accountId)}">${esc(c.accountId)}</a></td>
         <td class="muted">${esc(c.email)}</td>
         <td>${statePill}</td>
@@ -1072,103 +1070,6 @@ export class AdminApp {
     }
   }
 
-  async deleteTransfer(ctx: RouteContext): Promise<Response> {
-    const form = await ctx.request.formData();
-    const accountId = String(form.get('accountId') ?? '');
-    const transferId = String(form.get('transferId') ?? '');
-    const provider = this.#getPool().provider(accountId);
-    if (!provider) return json({ ok: false, error: `Unknown account ${accountId}.` });
-    try {
-      await provider.deleteTransfer(transferId);
-      this.#library.recordActivity('info', `Transfer removed from ${accountId}`, transferId);
-      return json({ ok: true, data: { accountId, transferId } });
-    } catch (err) {
-      return json({ ok: false, error: err instanceof Error ? err.message : String(err) });
-    }
-  }
-
-  async deleteFile(ctx: RouteContext): Promise<Response> {
-    const form = await ctx.request.formData();
-    const accountId = String(form.get('accountId') ?? '');
-    const fileId = String(form.get('fileId') ?? '');
-    if (!accountId || !fileId) return json({ ok: false, error: 'Missing accountId or fileId.' });
-    const provider = this.#getPool().provider(accountId);
-    if (!provider) return json({ ok: false, error: `Unknown account ${accountId}.` });
-    try {
-      await provider.deleteFile(fileId);
-    } catch (err) {
-      this.#library.recordActivity('bad', `Delete failed on ${accountId}/${fileId}`, err instanceof Error ? err.message : String(err));
-      return json({ ok: false, error: `Seedr delete failed: ${err instanceof Error ? err.message : String(err)}` });
-    }
-    this.#library.deleteFileRow(accountId, fileId);
-    this.#library.recordActivity('info', `File deleted from ${accountId}`, fileId);
-    return json({ ok: true, data: { accountId, fileId } });
-  }
-
-  async reAddMagnet(ctx: RouteContext): Promise<Response> {
-    const form = await ctx.request.formData();
-    const displayName = String(form.get('displayName') ?? '').trim();
-    if (displayName === '') return json({ ok: false, error: 'Missing display name.' });
-    const record = this.#library.magnetForFolder(displayName);
-    if (record === null) return json({ ok: false, error: `No stored magnet for "${displayName}".` });
-    await this.#getPool().refresh();
-    try {
-      const allocation = this.#getPool().allocate(0);
-      const transfer = await allocation.provider.addMagnet(record.magnet);
-      this.#library.recordMagnet(displayName, record.magnet, allocation.accountId);
-      this.#library.recordActivity('info', `Re-added to ${allocation.accountId}`, displayName);
-      void this.#indexer.scanAccount(allocation.provider).then(() => this.#enricher.tick());
-      return json({ ok: true, data: { accountId: allocation.accountId, transferId: transfer.id, displayName } });
-    } catch (err) {
-      if (err instanceof NoCapacityError) return json({ ok: false, error: 'No healthy account has space. Free some storage first.' });
-      return json({ ok: false, error: err instanceof Error ? err.message : String(err) });
-    }
-  }
-
-  async moveFile(ctx: RouteContext): Promise<Response> {
-    const form = await ctx.request.formData();
-    const sourceAccount = String(form.get('accountId') ?? '');
-    const fileId = String(form.get('fileId') ?? '');
-    if (sourceAccount === '' || fileId === '') return json({ ok: false, error: 'Missing accountId or fileId.' });
-    const file = this.#library.findFile(sourceAccount, fileId);
-    if (file === null) return json({ ok: false, error: `File ${sourceAccount}/${fileId} not found.` });
-    if (file.magnet === null) return json({ ok: false, error: 'No stored magnet for this file.' });
-    await this.#getPool().refresh();
-    let allocation;
-    try { allocation = this.#getPool().allocate(0); }
-    catch (err) {
-      if (err instanceof NoCapacityError) return json({ ok: false, error: 'No healthy account has space.' });
-      throw err;
-    }
-    if (allocation.accountId === sourceAccount) return json({ ok: false, error: `Pool picked the same account. All others are full or unhealthy.` });
-    let transferId: string;
-    try {
-      const transfer = await allocation.provider.addMagnet(file.magnet);
-      transferId = transfer.id;
-    } catch (err) {
-      return json({ ok: false, error: err instanceof Error ? err.message : String(err) });
-    }
-    const sourceProvider = this.#getPool().provider(sourceAccount);
-    let deleted = false;
-    let deleteError: string | null = null;
-    if (sourceProvider !== undefined) {
-      try {
-        await sourceProvider.deleteFile(fileId);
-        this.#library.deleteFileRow(sourceAccount, fileId);
-        deleted = true;
-      } catch (err) { deleteError = err instanceof Error ? err.message : String(err); }
-    }
-    const displayName = magnetDisplayName(file.magnet);
-    if (displayName !== null) this.#library.recordMagnet(displayName, file.magnet, allocation.accountId);
-    this.#library.recordActivity(
-      deleted ? 'success' : 'warn',
-      `Moved ${displayName ?? file.name} → ${allocation.accountId}`,
-      deleted ? 'Source deleted.' : `Source not deleted: ${deleteError ?? 'unknown'}`,
-    );
-    void this.#indexer.scanAccount(allocation.provider).then(() => this.#enricher.tick());
-    return json({ ok: true, data: { accountId: allocation.accountId, transferId, sourceDeleted: deleted, sourceError: deleteError } });
-  }
-
   // --------------------------------------------------------------------
   // Internal helpers
   // --------------------------------------------------------------------
@@ -1253,7 +1154,7 @@ export class AdminApp {
       : '';
 
     return `
-      <div class="poster-card ${allTorn ? 'torn' : ''} ${categories}" data-category="${categories}">
+      <div class="poster-card ${allTorn ? 'torn' : ''} ${categories}" data-category="${categories}"${primaryFile ? ` data-file-row="${esc(primaryFile.accountId)}/${esc(primaryFile.fileId)}"` : ''}>
         <div class="poster-cover">
           <div class="poster-fallback">${icon(t.kind === 'series' ? 'tv' : 'film', { size: 32 })}<span>${esc(t.name.slice(0, 2).toUpperCase())}</span></div>
           ${posterUrl ? `<img src="${posterUrl}" alt="${esc(t.name)}" loading="lazy" onerror="this.remove();" />` : ''}
@@ -1334,7 +1235,7 @@ export class AdminApp {
       : null;
     const refreshMeta = `<button class="btn btn-sm ghost" hx-post="/admin/api/metadata/${esc(t.key)}" hx-swap="none" title="Re-fetch this title's IMDb/TMDB match">${icon('rotate-ccw', { size: 12 })}</button>`;
 
-    return `<tr class="${trClass} ${categories}" data-category="${categories}">
+    return `<tr class="${trClass} ${categories}" data-category="${categories}"${primaryFile ? ` data-file-row="${esc(primaryFile.accountId)}/${esc(primaryFile.fileId)}"` : ''}>
       <td>
         <div class="movie-cell">
           <div class="poster-thumb"><span class="poster-thumb-fallback">${initial}</span>${poster ? `<img src="${poster}" alt="" onerror="this.remove();">` : ''}</div>
@@ -1451,6 +1352,11 @@ function isDeadTransfer(t: Transfer & { accountId: string }, ageSeconds: number)
   return t.state === 'running' && t.progress === 0 && t.seeders === 0 && ageSeconds > 120;
 }
 
+/**
+ * Re-exported for the existing test import path. The implementation lives in
+ * `magnet-name.ts` so the mutation layer can use it without importing this
+ * rendering module.
+ */
 export { magnetDisplayName };
 
 export function buildPoolEntries(credentials: CredentialFile) {

@@ -21,7 +21,7 @@ import { TransferWatcher } from './core/transfer-watcher.ts';
 import { Dumper } from './core/dumper.ts';
 import { AdminViews } from './core/admin-views.ts';
 import { AdminActions, type DumpResult } from './core/admin-actions.ts';
-import { buildAdminAssets } from './core/assets.ts';
+import { buildAdminAssets, assetList } from './core/assets.ts';
 import { STYLES_BODY, layout } from './admin/html.ts';
 import { type AccountStatus } from './core/account-pool.ts';
 import { NoCapacityError } from './core/account-pool.ts';
@@ -108,8 +108,7 @@ const admin = new AdminApp({
   enricher,
   actions,
   views,
-  cssPath: assets.css.path,
-  jsPath: assets.js.path,
+  assets,
   runDump,
 });
 
@@ -144,8 +143,8 @@ const addonPath = `/${config.addonSecret}`;
 const router = new Router()
   .get('/admin/assets/:name', (ctx) => {
     const name = ctx.params['name'] ?? '';
-    if (name === assets.css.path.split('/').pop()) return serveAsset(assets.css, ctx.request);
-    if (name === assets.js.path.split('/').pop())  return serveAsset(assets.js,  ctx.request);
+    const asset = assetList(assets).find((a) => a.path.endsWith(`/${name}`));
+    if (asset) return serveAsset(asset, ctx.request);
     return new Response('not found', { status: 404 });
   })
   .get('/', () => redirect('/admin'))
@@ -164,15 +163,20 @@ const router = new Router()
   .get('/healthz', () => new Response('ok'))
 
   // ---- JSON action endpoints (item 9: rich toasts, no page replacement) ----
+  //
+  // Every mutation is served by `AdminActions`. They used to be split: some
+  // here, some on `AdminApp` next to the HTML rendering, and the two halves
+  // disagreed about error reporting (one used status codes, the other
+  // answered 200 with `{ok:false}`). One owner now.
   .post('/admin/api/magnet', (ctx) => actions.addMagnet(ctx))
   .post('/admin/api/account/add', (ctx) => actions.addAccount(ctx))
   .post('/admin/api/account/delete', (ctx) => actions.deleteAccount(ctx))
   .post('/admin/api/account/purge', (ctx) => actions.purgeAccount(ctx))
   .post('/admin/api/account/reauth', (ctx) => actions.reauthAccount(ctx))
-  .post('/admin/api/transfer/delete', (ctx) => admin.deleteTransfer(ctx))
-  .post('/admin/api/move', (ctx) => admin.moveFile(ctx))
-  .post('/admin/api/file/delete', (ctx) => admin.deleteFile(ctx))
-  .post('/admin/api/readd', (ctx) => admin.reAddMagnet(ctx))
+  .post('/admin/api/transfer/delete', (ctx) => actions.deleteTransfer(ctx))
+  .post('/admin/api/move', (ctx) => actions.moveFile(ctx))
+  .post('/admin/api/file/delete', (ctx) => actions.deleteFile(ctx))
+  .post('/admin/api/readd', (ctx) => actions.reAddMagnet(ctx))
   .post('/admin/api/reindex', () => actions.reindex())
   .post('/admin/api/reindex/:accountId', (ctx) => actions.reindexAccount(ctx))
   .post('/admin/api/enrich-all', () => actions.enrichAll())
@@ -193,19 +197,19 @@ const router = new Router()
   .get(`${addonPath}/logo.png`, () => addon.logo(), { cors: true });
 
 // Compatibility shim for any client that hits the old direct-download paths.
-router.post('/admin/file/delete', (ctx) => admin.deleteFile(ctx));
+router.post('/admin/file/delete', (ctx) => actions.deleteFile(ctx));
 router.post('/admin/file/url', (ctx) => addon.fileUrl(ctx));
 router.get('/admin/file/download', (ctx) => addon.fileDownload(ctx));
 router.post('/admin/magnet', (ctx) => actions.addMagnet(ctx));
 router.post('/admin/reindex', () => actions.reindex());
-router.post('/admin/readd', (ctx) => admin.reAddMagnet(ctx));
-router.post('/admin/move', (ctx) => admin.moveFile(ctx));
+router.post('/admin/readd', (ctx) => actions.reAddMagnet(ctx));
+router.post('/admin/move', (ctx) => actions.moveFile(ctx));
 router.post('/admin/dump', () => actions.runDump());
 router.post('/admin/accounts/reload', () => actions.reload());
 router.post('/admin/accounts/add', (ctx) => actions.addAccount(ctx));
 router.post('/admin/accounts/delete', (ctx) => actions.deleteAccount(ctx));
 router.post('/admin/accounts/purge', (ctx) => actions.purgeAccount(ctx));
-router.post('/admin/transfers/delete', (ctx) => admin.deleteTransfer(ctx));
+router.post('/admin/transfers/delete', (ctx) => actions.deleteTransfer(ctx));
 
 const server = createServer(async (req, res) => {
   const url = `http://${req.headers.host ?? 'localhost'}${req.url ?? '/'}`;

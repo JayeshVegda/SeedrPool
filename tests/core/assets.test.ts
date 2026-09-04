@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildAdminAssets, serveAsset } from '../../src/core/assets.ts';
+import { buildAdminAssets, serveAsset, assetList } from '../../src/core/assets.ts';
 
 const CSS = ':root { --bg: #000 }';
 
@@ -75,5 +75,71 @@ describe('static assets', () => {
     const a = buildAdminAssets(() => CSS);
     const res = serveAsset(a.js, new Request('http://x/'));
     expect(res.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+  });
+});
+
+describe('vendor assets', () => {
+  // The three front-end libraries used to load from jsdelivr at runtime, so a
+  // blocked or slow CDN left the admin console with no interactivity at all
+  // and no way to tell. They are served from our own origin now.
+
+  it('serves htmx, Alpine, and sonner from our own hashed URLs', () => {
+    const a = buildAdminAssets(() => CSS);
+    for (const asset of [a.htmx, a.alpine, a.sonner]) {
+      expect(asset.path).toMatch(/^\/admin\/assets\/[a-z]+\.[A-Za-z0-9_-]{12}\.js$/);
+      expect(asset.contentType).toBe('application/javascript; charset=utf-8');
+    }
+  });
+
+  it('loads the real vendor bundles, not empty files', () => {
+    const a = buildAdminAssets(() => CSS);
+    // Rough floors: htmx and Alpine are ~45-50 KB minified, sonner ~20 KB.
+    expect(a.htmx.body.length).toBeGreaterThan(30_000);
+    expect(a.alpine.body.length).toBeGreaterThan(30_000);
+    expect(a.sonner.body.length).toBeGreaterThan(10_000);
+  });
+
+  it('ships a sonner bundle whose export is default, which the page relies on', () => {
+    // The page does `import toast from ...`. Importing `{ toast }` throws a
+    // SyntaxError at module evaluation, which is what silently disabled every
+    // toast in the app: window.toast was never assigned.
+    const a = buildAdminAssets(() => CSS);
+    expect(a.sonner.body).toContain('as default}');
+    expect(a.sonner.body).not.toMatch(/export\s*\{[^}]*\btoast\b[^}]*\}/);
+  });
+
+  it('carries no sourceMappingURL, which would 404 against our origin', () => {
+    const a = buildAdminAssets(() => CSS);
+    for (const asset of [a.htmx, a.alpine, a.sonner]) {
+      expect(asset.body).not.toContain('sourceMappingURL');
+    }
+  });
+
+  it('exposes every asset through assetList so the route can serve them', () => {
+    const a = buildAdminAssets(() => CSS);
+    const list = assetList(a);
+    expect(list).toHaveLength(5);
+    // The route matches on the trailing filename, so those must be unique.
+    const names = list.map((x) => x.path.split('/').pop());
+    expect(new Set(names).size).toBe(5);
+  });
+
+  it('gives the vendor bundles an immutable cache header too', () => {
+    const a = buildAdminAssets(() => CSS);
+    for (const asset of assetList(a)) {
+      const res = serveAsset(asset, new Request('http://x/'));
+      expect(res.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    }
+  });
+
+  it('registers Alpine before it can auto-start, per the client script', () => {
+    // Alpine's CDN build ends with queueMicrotask(() => Alpine.start()), and
+    // the microtask queue drains between deferred scripts. The client script
+    // must therefore cope with Alpine having already started, or every modal
+    // and every confirm-gated destructive action silently breaks.
+    const a = buildAdminAssets(() => CSS);
+    expect(a.alpine.body).toContain('queueMicrotask');
+    expect(a.js.body).toContain("document.addEventListener('alpine:init'");
+    expect(a.js.body).toContain('if (window.Alpine) registerAlpine()');
   });
 });

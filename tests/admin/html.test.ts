@@ -51,13 +51,64 @@ describe('formatBytes', () => {
 });
 
 describe('layout', () => {
+  const PATHS = {
+    cssPath: '/admin/assets/app.aaaaaaaaaaaa.css',
+    jsPath: '/admin/assets/app.bbbbbbbbbbbb.js',
+    htmxPath: '/admin/assets/htmx.cccccccccccc.js',
+    alpinePath: '/admin/assets/alpine.dddddddddddd.js',
+    sonnerPath: '/admin/assets/sonner.eeeeeeeeeeee.js',
+  };
+
   it('escapes the title and marks the active nav item', () => {
-    const page = layout({ title: '<x>', activeNav: '/admin/accounts', body: '<p>hi</p>' });
+    const page = layout({
+      title: '<x>',
+      activeNav: '/admin/accounts',
+      body: '<p>hi</p>',
+      ...PATHS,
+    });
     expect(page).toContain('&lt;x&gt; · SeedrPool');
     // The active nav anchor must be the one pointing at /admin/accounts.
     const activeMatch = page.match(/<a[^>]*href="\/admin\/accounts"[^>]*aria-current="page"[^>]*>/);
     expect(activeMatch).not.toBeNull();
     expect(page).toContain('<p>hi</p>');
+  });
+
+  it('imports sonner as a default export, not a named one', () => {
+    // `import { toast } from ...` throws a SyntaxError against this bundle,
+    // which left window.toast undefined and silently turned every toast in
+    // the app into a console.log. No action appeared to give any feedback.
+    const page = layout({ title: 'x', body: '', ...PATHS });
+    expect(page).toContain(`import toast from '${PATHS.sonnerPath}'`);
+    expect(page).not.toMatch(/import\s*\{\s*toast\s*\}/);
+  });
+
+  it('loads the client script before Alpine so alpine:init is not missed', () => {
+    // Alpine's bundle ends with queueMicrotask(() => Alpine.start()), and the
+    // microtask queue drains between deferred scripts. With Alpine first, the
+    // event had already fired before client.js could listen, so the modal
+    // store never registered and every confirm-gated action broke.
+    const page = layout({ title: 'x', body: '', ...PATHS });
+    const clientAt = page.indexOf(PATHS.jsPath);
+    const alpineAt = page.indexOf(PATHS.alpinePath);
+    expect(clientAt).toBeGreaterThan(-1);
+    expect(alpineAt).toBeGreaterThan(-1);
+    expect(clientAt).toBeLessThan(alpineAt);
+  });
+
+  it('serves every script from our own origin, never a CDN', () => {
+    // A blocked or slow CDN used to leave the console with zero
+    // interactivity and no way to tell.
+    const page = layout({ title: 'x', body: '', ...PATHS });
+    expect(page).not.toContain('jsdelivr');
+    expect(page).not.toContain('unpkg');
+    for (const src of [...page.matchAll(/<script src="([^"]+)"/g)].map((m) => m[1])) {
+      expect(src).toMatch(/^\/admin\/assets\//);
+    }
+  });
+
+  it('links the hashed stylesheet', () => {
+    const page = layout({ title: 'x', body: '', ...PATHS });
+    expect(page).toContain(`<link rel="stylesheet" href="${PATHS.cssPath}">`);
   });
 });
 

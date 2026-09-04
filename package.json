@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsc && npm run copy-assets",
-    "copy-assets": "node --input-type=module -e \"import {cpSync,mkdirSync} from 'node:fs'; mkdirSync('dist/admin',{recursive:true}); cpSync('src/admin/client.js','dist/admin/client.js');\"",
+    "copy-assets": "node --input-type=module -e \"import {cpSync,mkdirSync} from 'node:fs'; mkdirSync('dist/admin/vendor',{recursive:true}); cpSync('src/admin/client.js','dist/admin/client.js'); cpSync('src/admin/vendor','dist/admin/vendor',{recursive:true});\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

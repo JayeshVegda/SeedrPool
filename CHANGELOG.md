@@ -3,6 +3,77 @@
 All notable changes to SeedrPool are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## 0.3.0 — 2026-09-04
+
+### Fixed
+
+* **Every toast in the admin console was silently dead.** The page imported
+  sonner-js as `import { toast }`, but the bundle only has a *default*
+  export, so the module threw a SyntaxError, `window.toast` was never
+  assigned, and all feedback degraded to `console.log`. Add, delete, purge,
+  reindex, and dump were all reaching the server and reporting correctly;
+  nothing was rendered. Now imported as a default export.
+* **Every modal and every confirm-gated destructive action was dead.**
+  Alpine's bundle ends with `queueMicrotask(() => Alpine.start())`, and the
+  microtask queue drains between deferred scripts — so with Alpine loaded
+  before `client.js`, `alpine:init` had already fired before the listener was
+  installed. `Alpine.store('modals')` never registered, `$store.modals` was
+  undefined, and Add account, Update password, Purge and Remove threw on
+  click. The client script now loads first and also copes with Alpine having
+  already started.
+* **Purge left in-flight torrents running.** A downloading torrent lives in
+  Seedr's `torrents` list, not the folder tree, so it survived the purge and
+  re-created its folder minutes later — making the purge look like it had
+  silently failed. Transfers are now cancelled first, then folders and files
+  swept, and the count is reported separately.
+* **Deleting an account corrupted the library index.** Ids are positional, so
+  removing acc2 renumbered acc3 to acc2 while the `files` table still stored
+  the old ids — every row below the deleted account was reattributed to a
+  different Seedr account. Deletion now writes a `#deleted accN` tombstone
+  that holds the slot, and `addAccount` takes the next free slot rather than
+  `accounts.length + 1`.
+* **A fabricated free-space figure was sent to the client.** The magnet
+  ingest response carried `freeAfter: Number.MAX_SAFE_INTEGER` behind a
+  comment calling it a "best-effort placeholder", and the client rendered it
+  as if measured. It is now the real quota, or `null` when Seedr will not say.
+* **CRUD failures answered HTTP 200** with `{ok:false}`, so a proxy error
+  page or an auth challenge was indistinguishable from success. Failures now
+  carry a real status: 400 bad input, 404 unknown target, 409 no capacity,
+  502 Seedr refused. The client trusts the status first.
+* **A confirmed action reloaded the page 900 ms later**, destroying the toast
+  the user was meant to read — the exact failure the JSON-action path was
+  built to fix. The affected row is now removed in place and live regions
+  repoll.
+* Toasts fired before sonner finished loading are queued instead of dropped.
+* `htmx:responseError` no longer double-reports a JSON failure that
+  `htmx:afterRequest` has already surfaced with the server's own message.
+
+### Changed
+
+* **htmx, Alpine, and sonner-js are vendored and served from our own origin**
+  through the content-hashed asset pipeline, instead of being fetched from
+  jsDelivr at runtime with no SRI and no fallback. A blocked CDN previously
+  left the console with zero interactivity and no indication why.
+* **All mutations live in `core/admin-actions.ts`.** File, transfer, move, and
+  re-add handlers were on `admin/app.ts` next to the HTML rendering; the two
+  halves had drifted apart on error reporting. `admin/app.ts` renders,
+  `admin-actions.ts` mutates.
+* `moveFile` reports `sourceDeleted` and the reason when the source copy
+  could not be removed, rather than leaving a silent duplicate behind.
+* A dump that wrote nothing at all now answers 502 instead of reporting
+  success.
+
+### Added
+
+* `tests/core/admin-actions.test.ts`: 46 tests covering purge, delete, add,
+  file delete, transfer cancel, magnet ingest, move, re-add, reindex, dump,
+  and reload — asserting both the effect and the HTTP status. There was no
+  test coverage for any of these handlers before.
+* Credentials tests for the tombstone format and a `writeCredentials`
+  round-trip through a real file.
+* Asset tests asserting the vendored bundles are present, that sonner's
+  export is default, and that the script order cannot regress.
+
 ## 0.2.0 — 2026-09-02
 
 ### Changed

@@ -93,9 +93,12 @@ SEEDRPOOL_TMDB_API_KEY= \
   node dist/index.js
 ```
 
-There are **zero runtime dependencies** — the project uses `node:sqlite` and
-`fetch` from Node 24's standard library. The `npm install` step is
-strictly for the build.
+The only runtime dependency is `parse-torrent-title` (release-name parsing);
+everything else comes from Node 24's standard library — `node:sqlite` and
+`fetch`. The front-end libraries (htmx, Alpine, sonner-js) are vendored in
+`src/admin/vendor/` and served from the app's own origin, so the console has no
+runtime dependency on a CDN. The rest of `npm install` is strictly for the
+build.
 
 ## Required secret files
 
@@ -103,7 +106,7 @@ Three files must exist on disk and be readable by the process:
 
 | File | Format | Used by |
 | --- | --- | --- |
-| `seedrpool-credentials.txt` | one `email:password` per line, line N → `accN` | `SeedrV1Provider` |
+| `seedrpool-credentials.txt` | one `email:password` per line, slot N → `accN`; a `#deleted accN` line is a tombstone holding a retired slot | `SeedrV1Provider` |
 | `seedrpool-accounts.env` | `KEY=VALUE` (legacy v2 token-store) | legacy path, optional |
 | `seedrpool-addon-secret` | single line, any URL-safe string | Stremio addon URL prefix |
 
