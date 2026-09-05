@@ -49,8 +49,17 @@ const VIDEO_EXTENSIONS = /\.(mkv|mp4|avi|mov|wmv|flv|m4v|webm|ts|m2ts|mpg|mpeg)$
  * exactly like a domain followed by a dot.
  */
 const LEADING_JUNK = [
-  // www.site.tld followed by a dash, e.g. "www.1TamilMV.ing - "
-  /^\s*(?:www\.)?[a-z0-9-]+\.[a-z]{2,6}\s*[-–_]+\s*/i,
+  // www.site.tld followed by a dash, e.g. "www.1TamilMV.ing - ".
+  //
+  // The TLD is matched as any run of letters rather than a fixed 2-6 range:
+  // real pirate-site domains use long new-gTLDs, and a 2-6 cap missed one in
+  // production — `www.5MovieRulz.software - Breakfast (2026) ...` indexed
+  // under the title "www 5MovieRulz software - Breakfast", matched nothing
+  // on TMDB, and the file was invisible in Stremio while sitting right there
+  // on Seedr. The dash separator is what makes an unbounded TLD safe:
+  // `The.Matrix.1999.1080p - ...`-style titles still cannot match, because
+  // there is no dash directly after a `.tld`-looking token.
+  /^\s*(?:www\.)?[a-z0-9-]+\.[a-z]+\s*[-–_]+\s*/i,
   // A bracketed tag at the start, e.g. "[YTS.MX] ". A bracketed year is
   // left alone, since that is the title's own year rather than a site tag.
   /^\s*[[({](?!\s*(?:19|20)\d{2}\s*[)\]}])[^\])}]{1,30}[\])}]\s*[-–_]?\s*/,
