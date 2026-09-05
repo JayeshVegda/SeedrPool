@@ -169,6 +169,21 @@ CREATE TABLE IF NOT EXISTS activity (
 );
 CREATE INDEX IF NOT EXISTS activity_at ON activity(at DESC);
 
+-- Accounts with content that SeedrPool did not put there.
+--
+-- A shared Seedr account is not exclusively ours: the owner also uses it
+-- from Seedr's own apps. Their downloads appear on the account with no
+-- matching magnet in our 'magnets' table, so the indexer flags the account
+-- the first time it sees such a file. The operator sees a pill in the fleet
+-- page and can decide whether to care — the flag is informational, never a
+-- blocker. One row per account, cleared by a purge of that account.
+CREATE TABLE IF NOT EXISTS external_content (
+  account_id TEXT PRIMARY KEY,
+  first_seen_at INTEGER NOT NULL,
+  -- Example file/folder name, for the pill's tooltip.
+  example    TEXT
+);
+
 -- Source-of-truth table for the original magnet a title came from. The
 -- indexer matches folders to rows here by name and writes the magnet URL
 -- onto each files.magnet column. The admin re-add button reads from this
@@ -598,6 +613,43 @@ export class LibraryStore {
       )
       .get(ENRICH_MAX_ATTEMPTS) as { n: number };
     return Number(row.n);
+  }
+
+  /**
+   * Flags an account as holding content SeedrPool did not put there.
+   *
+   * Idempotent: the first sighting wins, because "first seen" is the useful
+   * timestamp and a rescan of the same external file must not reset it.
+   */
+  flagExternalContent(accountId: string, example: string): boolean {
+    const result = this.#db
+      .prepare(
+        `INSERT INTO external_content (account_id, first_seen_at, example)
+         VALUES (?, ?, ?)
+         ON CONFLICT(account_id) DO NOTHING`,
+      )
+      .run(accountId, Date.now(), example);
+    return Number(result.changes) === 1;
+  }
+
+  /** Drops the flag. A purge removes everything on the account, ours or not. */
+  clearExternalFlag(accountId: string): void {
+    this.#db.prepare('DELETE FROM external_content WHERE account_id = ?').run(accountId);
+  }
+
+  /** Accounts flagged for outside content, for the fleet page's pills. */
+  externalContent(): Map<string, { firstSeenAt: number; example: string | null }> {
+    const rows = this.#db
+      .prepare('SELECT account_id, first_seen_at, example FROM external_content')
+      .all() as Array<{ account_id: string; first_seen_at: number; example: string | null }>;
+    const map = new Map<string, { firstSeenAt: number; example: string | null }>();
+    for (const r of rows) {
+      map.set(String(r.account_id), {
+        firstSeenAt: Number(r.first_seen_at),
+        example: r.example === null ? null : String(r.example),
+      });
+    }
+    return map;
   }
 
   /**

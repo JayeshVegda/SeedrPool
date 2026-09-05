@@ -37,6 +37,11 @@ export interface AccountCard {
   library: { titles: number; files: number; bytes: number };
   /** Per-account transfer list, sourced from the cached fanout. */
   transfers: Array<Transfer & { accountId: string }>;
+  /**
+   * When non-null, the account holds content that SeedrPool did not put
+   * there — its owner is using it directly. Informational, never a blocker.
+   */
+  externalContent: { firstSeenAt: number; example: string | null } | null;
 }
 
 export interface AccountDetail extends AccountCard {
@@ -135,6 +140,7 @@ export class AdminViews {
     const pool = this.#getPool();
     const statuses = pool.statuses();
     const transfers = await pool.listAllTransfers();
+    const external = this.#library.externalContent();
     const transfersByAccount = new Map<string, Array<Transfer & { accountId: string }>>();
     for (const t of transfers) {
       const list = transfersByAccount.get(t.accountId);
@@ -150,6 +156,7 @@ export class AdminViews {
         status: s,
         library: stats,
         transfers: transfersByAccount.get(s.accountId) ?? [],
+        externalContent: external.get(s.accountId) ?? null,
       };
     });
   }

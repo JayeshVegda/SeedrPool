@@ -351,7 +351,7 @@ export class AdminApp {
       <div class="page-head">
         <div class="lead">
           <div class="eyebrow">${icon('server', { size: 11 })} ${esc(detail.email)}</div>
-          <h1>${esc(detail.accountId)} ${raw(statePill)}</h1>
+          <h1>${esc(detail.accountId)} ${raw(statePill)} ${raw(this.#externalPill(detail))}</h1>
           <p class="lede">Per-account overview. Library rows are direct from the local index; quota is live; transfers are cached for 5 s.</p>
         </div>
         <div class="actions">
@@ -773,7 +773,7 @@ export class AdminApp {
       return `<tr data-account-row="${esc(c.accountId)}">
         <td><a class="mono" style="font-weight:600; color:var(--text);" href="/admin/accounts/${esc(c.accountId)}">${esc(c.accountId)}</a></td>
         <td class="muted">${esc(c.email)}</td>
-        <td>${statePill}</td>
+        <td>${statePill} ${raw(this.#externalPill(c))}</td>
         <td>
           <div class="bar-inline">
             <div class="bar${c.status.cdnHealthy === false ? ' warn' : ''}"><div class="fill" style="--fill: ${(fillPct / 100).toFixed(4)}"></div></div>
@@ -1124,6 +1124,23 @@ export class AdminApp {
   // --------------------------------------------------------------------
   // Internal helpers
   // --------------------------------------------------------------------
+
+  /**
+   * Pill for an account whose owner is using it directly: content appeared
+   * that SeedrPool did not queue. Informational — the pool keeps serving
+   * the account either way; the operator just wants to know.
+   */
+  #externalPill(c: AccountCard | AccountDetail): string {
+    if (c.externalContent === null) return '';
+    const since = formatRelative(Date.now() - c.externalContent.firstSeenAt);
+    const example = c.externalContent.example !== null ? esc(c.externalContent.example.slice(0, 50)) : 'a new file';
+    return (
+      `<span class="pill warn" title="Content appeared on this account without a SeedrPool magnet — ` +
+      `its owner is using it directly. First seen ${esc(since)} ago: ${example}">` +
+      `<span class="dot"></span>Used outside</span>`
+    );
+  }
+
 
   #accountCard(c: AccountCard): string {
     const quota = c.status.quota;

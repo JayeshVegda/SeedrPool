@@ -21,6 +21,13 @@ import type { AccountPool } from './account-pool.ts';
 import type { LibraryStore } from '../library/store.ts';
 import type { Indexer } from '../library/indexer.ts';
 import type { MetadataEnricher } from '../library/metadata-enricher.ts';
+import type { FolderContents } from './types.ts';
+
+/** The provider surface #deleteFolderIfEmpty needs; keeps tests light. */
+interface StorageProviderLike {
+  listFolder(folderId: string): Promise<FolderContents>;
+  deleteFolder(folderId: string): Promise<void>;
+}
 import { json, type RouteContext } from './router.ts';
 import { NoCapacityError } from './account-pool.ts';
 import { SeedrV1Provider } from '../providers/seedr-v1.ts';
@@ -30,6 +37,7 @@ import { writeCredentials, type AccountCredential, type CredentialFile } from '.
 // layer, which would be a cycle now that the file/transfer handlers live here.
 import { magnetDisplayName } from '../admin/magnet-name.ts';
 import { formatBytes } from '../admin/html.ts';
+import { parseMediaName } from '../library/parse.ts';
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -177,6 +185,23 @@ export class AdminActions {
       return bad(`Not a magnet link: "${(badLine ?? '').slice(0, 60)}…"`);
     }
 
+    // Movies only. Series in the current addon get every episode listed as
+    // every other episode, so a series download is a broken experience
+    // rather than a degraded one; refusing at ingest with a clear message
+    // beats discovering it after a multi-GB download. The check runs before
+    // the pool refresh, so it costs nothing.
+    for (const magnet of lines) {
+      const name = magnetDisplayName(magnet) ?? magnet;
+      const parsed = parseMediaName(name);
+      if (parsed.kind === 'series') {
+        return bad(
+          `This looks like a series (S${String(parsed.season ?? '?').padStart(2, '0')}` +
+            `${parsed.episode !== null ? `E${String(parsed.episode).padStart(2, '0')}` : ''}). ` +
+            'SeedrPool serves movies only.',
+        );
+      }
+    }
+
     const pool = this.#getPool();
     const library = this.#getLibrary();
     try {
@@ -289,6 +314,7 @@ export class AdminActions {
     if (!provider) {
       // Already removed: clean the library.
       const removed = this.#getLibrary().deleteAccountFiles(accountId);
+      this.#getLibrary().clearExternalFlag(accountId);
       this.#getLibrary().recordActivity(
         'warn',
         `Purged ${accountId} from library (not in pool)`,
@@ -348,6 +374,9 @@ export class AdminActions {
     }
 
     const removed = this.#getLibrary().deleteAccountFiles(accountId);
+    // The account is wiped on Seedr, so any outside-content flag describes
+    // nothing that exists anymore.
+    this.#getLibrary().clearExternalFlag(accountId);
     // The pool's cached quota and transfer list both describe a state that
     // no longer exists.
     pool.invalidateTransfers();
@@ -585,6 +614,13 @@ export class AdminActions {
    * The library row is only dropped once Seedr has confirmed the delete. The
    * other order would leave a file playing in Stremio that the admin claims
    * does not exist.
+   *
+   * When the file was the last thing in its folder, the now-empty folder is
+   * deleted too. Seedr keeps empty folders forever, so without this every
+   * delete leaked one: the account slowly fills with zero-title husks (the
+   * production pool already carried one — a 0-byte "In The Mood For Love"
+   * shell that outlived its file by days). Folder removal is best-effort: a
+   * Seedr refusal here must not fail a delete that already succeeded.
    */
   async deleteFile(ctx: RouteContext): Promise<Response> {
     const form = await ctx.request.formData();
@@ -593,6 +629,10 @@ export class AdminActions {
     if (!accountId || !fileId) return bad('Missing accountId or fileId.');
     const provider = this.#getPool().provider(accountId);
     if (!provider) return bad(`Unknown account ${accountId}.`, 404);
+
+    // The folder id is needed before the row is dropped; take it first.
+    const file = this.#getLibrary().findFile(accountId, fileId);
+
     try {
       await provider.deleteFile(fileId);
     } catch (err) {
@@ -601,8 +641,39 @@ export class AdminActions {
       return upstream(`Seedr delete failed: ${message}`);
     }
     this.#getLibrary().deleteFileRow(accountId, fileId);
-    this.#getLibrary().recordActivity('info', `File deleted from ${accountId}`, fileId);
-    return ok({ accountId, fileId });
+
+    const folderRemoved = file !== null
+      ? await this.#deleteFolderIfEmpty(provider, accountId, file.folderId)
+      : false;
+
+    this.#getLibrary().recordActivity(
+      'info',
+      `File deleted from ${accountId}`,
+      folderRemoved ? `${fileId} (empty folder cleaned)` : fileId,
+    );
+    return ok({ accountId, fileId, folderRemoved });
+  }
+
+  /**
+   * Removes a folder on Seedr when it holds nothing.
+   *
+   * Never throws: callers use this after a successful mutation, and a
+   * folder-level refusal is hygiene, not correctness. Returns whether a
+   * folder was actually removed.
+   */
+  async #deleteFolderIfEmpty(
+    provider: StorageProviderLike,
+    accountId: string,
+    folderId: string,
+  ): Promise<boolean> {
+    try {
+      const contents = await provider.listFolder(folderId);
+      if (contents.folders.length > 0 || contents.files.length > 0) return false;
+      await provider.deleteFolder(folderId);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Re-queues a magnet the library already knows about. */
@@ -699,11 +770,17 @@ export class AdminActions {
     const sourceProvider = pool.provider(sourceAccount);
     let deleted = false;
     let deleteError: string | null = null;
+    let sourceFolderRemoved = false;
     if (sourceProvider !== undefined) {
       try {
         await sourceProvider.deleteFile(fileId);
         library.deleteFileRow(sourceAccount, fileId);
         deleted = true;
+        sourceFolderRemoved = await this.#deleteFolderIfEmpty(
+          sourceProvider,
+          sourceAccount,
+          file.folderId,
+        );
       } catch (err) {
         deleteError = err instanceof Error ? err.message : String(err);
       }
@@ -716,7 +793,11 @@ export class AdminActions {
     library.recordActivity(
       deleted ? 'success' : 'warn',
       `Moved ${displayName ?? file.name} → ${allocation.accountId}`,
-      deleted ? 'Source deleted.' : `Source not deleted: ${deleteError ?? 'unknown'}`,
+      deleted
+        ? sourceFolderRemoved
+          ? 'Source deleted, empty folder cleaned.'
+          : 'Source deleted.'
+        : `Source not deleted: ${deleteError ?? 'unknown'}`,
     );
     pool.invalidateTransfers();
     void this.#indexer.scanAccount(allocation.provider).then(() => this.#enricher.tick());

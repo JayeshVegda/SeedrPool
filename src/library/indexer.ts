@@ -150,6 +150,7 @@ export class Indexer {
     // enricher once per scan — the operator's catalog and Stremio both
     // need the IMDb id within seconds, not on the next 30-min poll.
     let newTitles = 0;
+    const external: string[] = [];
     const pruned = this.#store.transaction(() => {
       for (const entry of videos) {
         const { file, folderId, magnet } = entry;
@@ -159,6 +160,16 @@ export class Indexer {
         // A file whose name yields no title would produce an unusable catalog
         // entry, so it is skipped rather than indexed under an empty key.
         if (key === '') continue;
+
+        // Content we did not put there: a NEW file (no row yet) whose folder
+        // has no magnet on record. Everything SeedrPool queues goes through
+        // recordMagnet, so a magnetless arrival means the account's owner
+        // used it directly — a shared account in active use outside us.
+        // Legacy files that pre-date the magnets table are already indexed,
+        // so the `existing === null` guard keeps them quiet.
+        if (magnet === null && this.#store.findFile(accountId, file.id) === null) {
+          external.push(file.name);
+        }
 
         const inserted = this.#store.upsertTitle({
           key,
@@ -201,6 +212,20 @@ export class Indexer {
 
       return this.#store.pruneAccount(accountId, seenAt);
     });
+
+    // Outside-content flag: one row per account, first sighting wins. The
+    // activity entry fires only on the first-ever sighting so a shared
+    // account in steady use logs once, not on every scan.
+    for (const name of external) {
+      if (this.#store.flagExternalContent(accountId, name)) {
+        this.#store.recordActivity(
+          'warn',
+          `Outside content on ${accountId}`,
+          `"${name.slice(0, 60)}" appeared without a SeedrPool magnet — the account's owner is using it directly`,
+        );
+        break;
+      }
+    }
 
     if (newTitles > 0 && this.#onScanComplete !== null) {
       // Fire-and-forget: the next poll cycle is the safety net, so a slow
