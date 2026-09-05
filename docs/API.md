@@ -3,7 +3,8 @@
 SeedrPool exposes two surfaces:
 
 * the **Stremio addon** under `/<addonSecret>/...` (public)
-* the **operator console** under `/admin/...` (basic-auth)
+* the **operator console** under `/admin/...` (cookie login at `/admin/login`;
+  APIs answer 401 JSON when the session is missing)
 
 ## Stremio addon
 
@@ -162,8 +163,12 @@ first `X-Forwarded-For` entry, then the TCP peer.
 
 ## Operator console (admin)
 
-All `/admin/*` routes require HTTP basic auth. The realm string in
-the `WWW-Authenticate` header is `SeedrPool`.
+All `/admin/*` routes require a session cookie, minted by the login page at
+`/admin/login` (`POST /admin/login` with `user` + `password`; 12-hour sliding
+expiry; `POST /admin/logout` drops it). `/admin/api/*` calls answer
+`401 {"ok":false,"error":"Not signed in."}` when the session is missing, so a
+client can react instead of parsing HTML. The addon routes and `/healthz` are
+unaffected.
 
 | Method | Path | Purpose |
 | --- | --- | --- |

@@ -10,7 +10,9 @@ import { createServer } from 'node:http';
 import { loadConfig } from './core/config.ts';
 import { loadCredentials } from './core/credentials.ts';
 import { AccountPool } from './core/account-pool.ts';
-import { Router, htmlResponse, json, redirect, requireBasicAuth, serveAsset } from './core/router.ts';
+import { Router, htmlResponse, json, redirect, serveAsset } from './core/router.ts';
+import { SessionAuth } from './core/session.ts';
+import { loginPage } from './admin/html.ts';
 import { AdminApp, buildPoolEntries } from './admin/app.ts';
 import { LibraryStore } from './library/store.ts';
 import { Indexer } from './library/indexer.ts';
@@ -92,6 +94,14 @@ const enricher = new MetadataEnricher(library, tmdb);
 const addon = new AddonApp(library, () => pool, config);
 const watcher = new TransferWatcher(() => pool, indexer);
 const views = new AdminViews(() => pool, library);
+
+// Cookie sessions replace the native basic-auth prompt. The credentials are
+// the same env pair as before; what changes is the surface: a real form,
+// logout, and a 12-hour sliding expiry instead of the browser re-sending the
+// password on every request forever.
+// An empty password disables auth entirely (dev on loopback), same contract
+// the basic-auth gate had.
+const auth = new SessionAuth(config.adminUser, config.adminPassword);
 
 const dumper = new Dumper({ directory: config.dumpsDir });
 
@@ -236,6 +246,36 @@ const router = new Router()
     return new Response('not found', { status: 404 });
   })
   .get('/', () => redirect('/admin'))
+  // ---- Auth ----
+  .get('/admin/login', () =>
+    htmlResponse(loginPage(assets.css.path)),
+  )
+  .post('/admin/login', async (ctx) => {
+    const form = await ctx.request.formData();
+    const user = String(form.get('user') ?? '');
+    const password = String(form.get('password') ?? '');
+
+    // Constant delay regardless of outcome, so a wrong username and a wrong
+    // password are indistinguishable by timing.
+    if (!auth.verify(user, password)) {
+      await sleep(300);
+      library.recordActivity('warn', 'Failed sign-in attempt', `user "${user.slice(0, 40)}"`);
+      return htmlResponse(loginPage(assets.css.path, 'Wrong user or password.'), { status: 401 });
+    }
+
+    const { cookie } = auth.createSession();
+    library.recordActivity('info', 'Signed in', user);
+    const res = redirect('/admin', 303);
+    res.headers.append('Set-Cookie', cookie);
+    return res;
+  })
+  .post('/admin/logout', (ctx) => {
+    const expired = auth.destroy(ctx.request);
+    library.recordActivity('info', 'Signed out');
+    const res = redirect('/admin/login', 303);
+    res.headers.append('Set-Cookie', expired);
+    return res;
+  })
   .get('/admin', () => admin.overview())
   .get('/admin/library', () => admin.library())
   .get('/admin/transfers', () => admin.transfers())
@@ -332,9 +372,30 @@ const server = createServer(async (req, res) => {
   let response: Response;
   try {
     const path = new URL(url).pathname;
-    const isPublic = path === '/healthz' || path.startsWith(addonPath) || path.startsWith('/admin/assets/');
-    const challenge = isPublic ? null : requireBasicAuth(request, config.adminUser, config.adminPassword);
-    response = challenge ?? (await router.handle(request));
+    const isPublic =
+      path === '/healthz' || path.startsWith(addonPath) || path.startsWith('/admin/assets/');
+    // The login endpoints themselves must be reachable without a session,
+    // or nobody could ever get one.
+    const isAuthRoute = path === '/admin/login';
+
+    if (!isPublic && !isAuthRoute && config.adminPassword !== '') {
+      const session = auth.check(request);
+      if (!session.ok) {
+        // API calls get a machine-readable answer so the client can react;
+        // page navigations get the form.
+        const wantsJson = path.startsWith('/admin/api/') || path.startsWith('/admin/transfers/count');
+        response = wantsJson
+          ? json({ ok: false, error: 'Not signed in.' }, { status: 401 })
+          : redirect('/admin/login', 302);
+      } else {
+        response = await router.handle(request);
+        if (session.refreshCookie !== null) {
+          response.headers.append('Set-Cookie', session.refreshCookie);
+        }
+      }
+    } else {
+      response = await router.handle(request);
+    }
   } catch (err) {
     console.error('request failed:', err instanceof Error ? err.message : err);
     response = htmlResponse(`<h1>500</h1><p>Internal error.</p>`, { status: 500 });
@@ -352,6 +413,11 @@ function readBody(req: import('node:http').IncomingMessage): Promise<Buffer> {
     req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
+}
+
+/** Login attempts cost the same whether the username or password was wrong. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 const statuses = await pool.refresh();

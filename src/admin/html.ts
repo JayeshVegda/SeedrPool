@@ -1317,6 +1317,50 @@ td.mono, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nu
 .bar-track { height: 6px; background: var(--surface-3); border-radius: 3px; overflow: hidden; }
 .bar-fill { height: 100%; border-radius: 3px; transition: width var(--t-slow) var(--ease-out); }
 .bar-num { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+
+/* =====================================================================
+   Login screen. Standalone from the app shell: the page renders before
+   any session exists, so nothing here may depend on Alpine or htmx.
+   ===================================================================== */
+
+.login-body {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 100vh; padding: 1rem;
+  background: var(--bg);
+}
+.login-card {
+  width: 100%; max-width: 340px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-lg);
+  padding: 1.6rem 1.5rem;
+  box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.6);
+}
+.login-brand { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 1.3rem; }
+.login-brand .brand-mark {
+  width: 38px; height: 38px; border-radius: var(--r-md);
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-dim); color: var(--accent); flex-shrink: 0;
+}
+.login-title { font-weight: 700; letter-spacing: -0.01em; }
+.login-sub { font-size: 0.72rem; color: var(--text-muted); }
+.login-form { display: flex; flex-direction: column; gap: 0.85rem; }
+.login-submit { margin-top: 0.4rem; padding: 0.55rem; width: 100%; }
+.login-error {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
+  border-radius: var(--r-md);
+  padding: 0.55rem 0.8rem;
+  font-size: 0.8rem;
+  margin-bottom: 1rem;
+}
+.logout-btn {
+  width: 100%; justify-content: flex-start;
+  background: transparent; border: none; color: var(--text-muted);
+  font: inherit; cursor: pointer; padding: 0.45rem 0.5rem;
+}
+.logout-btn:hover { color: var(--text); background: var(--surface-2); }
 `;
 
 /**
@@ -1429,6 +1473,10 @@ export function layout(options: LayoutOptions): string {
     <div class="sidebar-foot">
       <a href="/healthz" target="_blank" rel="noreferrer">${icon('heart-pulse', { size: 13 })} Health</a>
       <a href="https://github.com/JayeshVegda/SeedrPool" target="_blank" rel="noreferrer">${icon('external-link', { size: 13 })} Repo</a>
+      <button type="button" class="btn logout-btn" x-data
+              x-on:click="fetch('/admin/logout', { method: 'POST' }).then(() => window.location = '/admin/login')">
+        ${icon('log-out', { size: 13 })} Sign out
+      </button>
     </div>
   </aside>
   <main class="main" hx-history-elt>
@@ -1498,3 +1546,54 @@ ${scriptTags({
 </html>`;
 }
 
+
+/**
+ * The login screen, standalone: no sidebar, no nav, no live regions — a
+ * single centered card. Rendered by the auth flow before any session
+ * exists, so nothing in it may depend on Alpine stores being initialized.
+ *
+ * `error` is the previous attempt's failure message, re-shown so a wrong
+ * password is visible feedback rather than a cleared form.
+ */
+export function loginPage(cssPath: string, error = ''): string {
+  const banner = error
+    ? `<div class="login-error" role="alert">${esc(error)}</div>`
+    : '';
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex">
+<title>Sign in · SeedrPool</title>
+<link rel="stylesheet" href="${esc(cssPath)}">
+</head>
+<body class="login-body">
+  <div class="login-card">
+    <div class="login-brand">
+      <span class="brand-mark">${icon('layers', { size: 18 })}</span>
+      <div>
+        <div class="login-title">SeedrPool</div>
+        <div class="login-sub">Command Deck</div>
+      </div>
+    </div>
+    ${banner}
+    <form method="POST" action="/admin/login" class="login-form">
+      <div class="field">
+        <label class="field-label" for="user">User</label>
+        <input class="field-input" type="text" id="user" name="user"
+               autocomplete="username" required autofocus spellcheck="false">
+      </div>
+      <div class="field">
+        <label class="field-label" for="password">Password</label>
+        <input class="field-input" type="password" id="password" name="password"
+               autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn primary login-submit">Sign in</button>
+    </form>
+  </div>
+</body>
+</html>`;
+}

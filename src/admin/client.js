@@ -270,9 +270,15 @@
   // page, a proxy 502, an auth challenge).
   document.addEventListener('htmx:responseError', (e) => {
     const xhr = e.detail && e.detail.xhr;
+    const status = xhr ? xhr.status : 0;
+    // A 401 means the session expired. Redirect to the form rather than
+    // telling the user about a request they cannot fix from here.
+    if (status === 401) {
+      window.location = '/admin/login';
+      return;
+    }
     const ct = (xhr && xhr.getResponseHeader('content-type')) || '';
     if (ct.includes('application/json')) return;
-    const status = xhr ? xhr.status : 0;
     showToast(
       'bad',
       'Request failed',
@@ -282,6 +288,18 @@
   document.addEventListener('htmx:sendError', () => {
     showToast('bad', 'Network error', 'Could not reach the server');
   });
+
+  // Same for the non-htmx fetch paths (confirm dialog, logout).
+  const rawFetch = window.fetch;
+  window.fetch = function () {
+    return rawFetch.apply(this, arguments).then(function (res) {
+      if (res.status === 401) {
+        window.location = '/admin/login';
+        return new Promise(function () {}); // halt the caller's chain
+      }
+      return res;
+    });
+  };
 
   // htmx after-swap: re-bind any Alpine-declared x-data and re-focus the
   // first input that lost focus on swap.

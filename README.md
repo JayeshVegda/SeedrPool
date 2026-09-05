@@ -124,7 +124,7 @@ SeedrPool/
 ├── src/
 │   ├── addon/           Stremio addon endpoints (manifest, catalog,
 │   │                    meta, stream, subtitles, play)
-│   ├── admin/           basic-auth operator console + html tagged template
+│   ├── admin/           cookie-login operator console + html templates
 │   ├── core/            pool, watcher, router, rate-limiter (outbound),
 │   │                    request-limiter (inbound), config, credentials,
 │   │                    admin-actions, admin-views, assets, dumper, types

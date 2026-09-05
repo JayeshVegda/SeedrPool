@@ -135,8 +135,9 @@ seedr.zayu.dev {
 }
 ```
 
-SeedrPool has its own basic-auth on `/admin/*`, but adding Caddy's
-`basicauth` in front is defense in depth. The Stremio addon paths (under
+SeedrPool authenticates `/admin/*` with a cookie login page (see
+`/admin/login`; sessions last 12 h with a sliding refresh). Adding Caddy's
+`basicauth` in front is still defense in depth. The Stremio addon paths (under
 `/OXLwzaLuh9UJFqVH9SOjaz55awwrAV/...`) must be **publicly accessible**
 to Stremio's catalog service, so they sit outside the Caddy `basicauth`
 matcher. The Stremio addon secret itself is the only access control.
@@ -151,8 +152,8 @@ matcher. The Stremio addon secret itself is the only access control.
 | `SEEDRPOOL_ADDON_SECRET_PATH` | `/secrets/seedrpool-addon-secret` | addon URL prefix |
 | `SEEDRPOOL_DB_PATH` | `/app/data/library.sqlite` | sqlite file |
 | `SEEDRPOOL_PUBLIC_URL` | — | canonical public URL (used in addon manifest) |
-| `SEEDRPOOL_ADMIN_USER` | `jay` | basic-auth user |
-| `SEEDRPOOL_ADMIN_PASSWORD` | *(empty = no auth)* | basic-auth password |
+| `SEEDRPOOL_ADMIN_USER` | `jay` | login user |
+| `SEEDRPOOL_ADMIN_PASSWORD` | *(empty = no auth)* | login password |
 | `SEEDRPOOL_TMDB_API_KEY` | *(empty = no enricher)* | TMDB v3 key, query-param style |
 
 Empty `SEEDRPOOL_TMDB_API_KEY` is fine for development — the indexer

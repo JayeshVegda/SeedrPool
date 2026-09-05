@@ -5,7 +5,8 @@ is yellow, red, or silent in the operator console.
 
 ## The operator console
 
-`https://seedr.zayu.dev/admin` (basic-auth).
+`https://seedr.zayu.dev/admin` (cookie login at `/admin/login`, 12-hour
+sliding session).
 
 Five pages:
 
