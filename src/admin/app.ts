@@ -48,6 +48,7 @@ export class AdminApp {
   #onAccountsChanged: () => Promise<void>;
   #library: LibraryStore;
   #views: AdminViews;
+  #healthReport: () => import('../core/health.ts').HealthReport;
   #actions: AdminActions;
   #indexer: Indexer;
   #enricher: MetadataEnricher;
@@ -64,6 +65,8 @@ export class AdminApp {
     enricher: MetadataEnricher;
     actions: AdminActions;
     views: AdminViews;
+    /** Builds a fresh health report; see core/health.ts. */
+    healthReport: () => import('../core/health.ts').HealthReport;
     assets: AdminAssets;
     runDump: () => Promise<DumpResult>;
   }) {
@@ -76,6 +79,7 @@ export class AdminApp {
     this.#enricher = deps.enricher;
     this.#actions = deps.actions;
     this.#views = deps.views;
+    this.#healthReport = deps.healthReport;
     this.#assets = deps.assets;
     this.#runDump = deps.runDump;
   }
@@ -997,6 +1001,53 @@ export class AdminApp {
   // --------------------------------------------------------------------
   // Dumps inventory
   // --------------------------------------------------------------------
+
+  // --------------------------------------------------------------------
+  // Health — the same checks /healthz grades, rendered for a human.
+  // --------------------------------------------------------------------
+
+  healthPage(): Response {
+    const report = this.#healthReport();
+
+    const badge = (status: 'ok' | 'warn' | 'bad') =>
+      status === 'ok'
+        ? '<span class="pill ok live"><span class="dot"></span>OK</span>'
+        : status === 'warn'
+          ? '<span class="pill warn"><span class="dot"></span>Warn</span>'
+          : '<span class="pill bad"><span class="dot"></span>Bad</span>';
+
+    const rows = report.checks
+      .map((c) => `<tr>
+        <td class="mono">${esc(c.name)}</td>
+        <td>${badge(c.status)}</td>
+        <td class="muted">${c.detail === null ? '—' : esc(c.detail)}</td>
+      </tr>`)
+      .join('');
+
+    const overall = report.status === 'ok'
+      ? 'All subsystems healthy.'
+      : report.status === 'warn'
+        ? 'Serving, but something needs attention.'
+        : 'One or more subsystems are down.';
+
+    return this.#page('Health', '/admin/health', html`
+      <div class="page-head">
+        <div class="lead">
+          <div class="eyebrow">${icon('heart-pulse', { size: 11 })} Health</div>
+          <h1>${badge(report.status)} ${overall}</h1>
+          <div class="sub">The same checks <code>/healthz</code> grades — one definition of healthy, two consumers.</div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Subsystem</th><th>Status</th><th>Detail</th></tr></thead>
+            <tbody>${raw(rows)}</tbody>
+          </table>
+        </div>
+      </div>
+    `);
+  }
 
   async dumps(): Promise<Response> {
     const { readdir, stat } = await import('node:fs/promises');

@@ -250,6 +250,9 @@
 
   /** Mirrors the server's formatBytes so toasts read the same as the page. */
   function formatBytes(n) {
+    // The server serializes its own implementation into the page before this
+    // script runs, so this fallback only exists if that injection ever breaks.
+    if (typeof window.formatBytes === 'function') return window.formatBytes(n);
     if (typeof n !== 'number' || !isFinite(n) || n < 0) return '—';
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
     let v = n, i = 0;
@@ -512,7 +515,9 @@
             `${d.seedrDeleted} Seedr item${d.seedrDeleted === 1 ? '' : 's'}, ` +
               `${d.transfersCancelled} transfer${d.transfersCancelled === 1 ? '' : 's'}, ` +
               `${d.libraryDeleted} library row${d.libraryDeleted === 1 ? '' : 's'}` +
-              (d.failed > 0 ? `, ${d.failed} failed` : ''),
+              (d.failed > 0
+                ? `, ${d.failed} failed: ${d.failureReasons ? d.failureReasons.join('; ') : 'unknown'}`
+                : ''),
           );
         } else if (d.remaining !== undefined) {
           showToast('ok', `Removed ${d.accountId}`, `${d.remaining} account${d.remaining === 1 ? '' : 's'} left in the pool`);

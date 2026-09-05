@@ -3,6 +3,64 @@
 All notable changes to SeedrPool are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## 0.3.2 — 2026-09-04
+
+### Added
+
+* **A real readiness check.** `/healthz` used to be a hardcoded `'ok'` — a
+  liveness probe that proved the event loop existed and nothing else. A dead
+  database, a pool with every account offline, an indexer dead for a day:
+  all answered 200. It now grades four subsystems (database, pool, indexer
+  freshness, enricher) and answers 503 when any of them is bad, so an uptime
+  monitor or `docker compose ps` actually sees the failure. Warn does not
+  fail the probe — a pool at 25% healthy or a stale index still serves
+  traffic, and restarting the container over it would make things worse.
+* **`/admin/health`** renders the same checks for a human. It previously
+  returned `transferCount()` — a copy-paste leftover answering `{"count":N}`
+  to anything expecting a health document. One grading definition, two
+  consumers.
+* Crash guards: `unhandledRejection` / `uncaughtException` handlers
+  installed before anything else runs. One stray rejected promise from a
+  background timer used to kill the process silently; Docker restarted it
+  and mid-download state died with no trace. Fatal errors now also land in
+  the activity log, the one place the operator reads.
+
+### Fixed
+
+* **The metadata enricher retried unmatched titles forever.** A title TMDB
+  can never match — a typo in a release name, an obscure regional cut — was
+  re-queried every 30 minutes for the life of the process, burning quota and
+  log lines, and since unmatched titles are invisible to Stremio, invisible
+  forever. Lookups now cap at 3 attempts (`ENRICH_MAX_ATTEMPTS`), a warning
+  with the recovery path lands in the activity log on the crossing attempt,
+  and the library row's "re-fetch" button resets the counter. A transport
+  error (TMDB 429, network blip) does not consume an attempt — a burst of
+  rate limits used to be able to permanently give up on titles that were
+  never actually looked at.
+* **`allocate(0)` could place a 4 GB file on an account with 10 MB free.**
+  `moveFile` now passes the file's actual size (and the 409 error names the
+  size it needed), and `reAddMagnet` passes the size summed from the magnet's
+  previously indexed files. The transfer no longer sits at 0% forever on an
+  account that never had room.
+* **The WAL grew without bound.** Only `journal_mode` was set; no
+  autocheckpoint, no busy timeout, nothing on shutdown. Production measured
+  407 KB of WAL against a 72 KB database within a day. Now: `busy_timeout`
+  5 s (a restart race waits instead of throwing SQLITE_BUSY),
+  `wal_autocheckpoint` 512 pages, and `close()` runs
+  `wal_checkpoint(TRUNCATE)` so a restart after OOM or host reboot finds a
+  compact database.
+* **The manifest reported version 0.1.0** while the shipped version had
+  moved past 0.3 — hardcoded in `addon/app.ts`, drifting from package.json,
+  so Stremio's addon list displayed a version nobody was running. The
+  manifest now reads package.json through `resolveJsonModule`.
+* `formatBytes` existed twice — server said "4.00 GiB", a client toast said
+  "4.3 GB" for the same number. The server now serializes its own
+  implementation into the page and the client prefers it.
+* Purge failures now say why. "3 failed" carried no reason; the report and
+  toast include one line per distinct refusal.
+* SIGTERM: the enricher is stopped, and a hung keep-alive connection no
+  longer holds shutdown open past 10 s.
+
 ## 0.3.1 — 2026-09-04
 
 ### Security

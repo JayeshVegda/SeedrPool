@@ -25,6 +25,7 @@ import type { LibraryFile, LibraryStore, TitleSummary } from '../library/store.t
 import { json, redirect, type RouteContext } from '../core/router.ts';
 import { formatBytes } from '../admin/html.ts';
 import { posterUrl, backdropUrl, type TmdbMatch } from '../library/tmdb.ts';
+import packageVersion from '../../package.json' with { type: 'json' };
 
 /** Matches an IMDb id segment. */
 const IMDB_ID = /^tt\d{6,}$/i;
@@ -53,7 +54,10 @@ export class AddonApp {
 
     return json({
       id: 'dev.zayu.seedrpool',
-      version: '0.1.0',
+      // From package.json, the single source of truth. This was hardcoded to
+      // '0.1.0' while the shipped version moved on, so Stremio's addon list
+      // displayed a version nobody was running.
+      version: packageVersion.version,
       name: 'SeedrPool',
       description:
         `Private library pooled from ${this.#pool().capacity().totalAccounts} Seedr ` +

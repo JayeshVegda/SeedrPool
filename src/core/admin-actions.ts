@@ -29,6 +29,7 @@ import { writeCredentials, type AccountCredential, type CredentialFile } from '.
 // this module is the mutation layer and must not depend on the rendering
 // layer, which would be a cycle now that the file/transfer handlers live here.
 import { magnetDisplayName } from '../admin/magnet-name.ts';
+import { formatBytes } from '../admin/html.ts';
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -103,6 +104,8 @@ export interface AccountPurgeResult {
   libraryDeleted: number;
   /** Items Seedr refused to delete, usually because of an upstream error. */
   failed: number;
+  /** One line per distinct refusal, so "3 failed" is answerable. */
+  failureReasons: string[];
 }
 
 export interface AccountAddResult {
@@ -297,32 +300,43 @@ export class AdminActions {
         transfersCancelled: 0,
         libraryDeleted: removed,
         failed: 0,
+        failureReasons: [],
       };
       return ok(result);
     }
     let deleted = 0;
     let cancelled = 0;
     let failed = 0;
+    /** First refusal reason per kind, so "3 failed" is answerable. */
+    const failures: string[] = [];
+    const note = (kind: string, err: unknown): void => {
+      failed += 1;
+      const reason = err instanceof Error ? err.message : String(err);
+      const line = `${kind}: ${reason}`;
+      // Keep one line per kind; a sweep that fails for one reason usually
+      // fails every item for the same reason, and 40 identical lines is noise.
+      if (!failures.includes(line)) failures.push(line);
+    };
 
     // 1. Cancel in-flight torrents. A failure to list them is not fatal —
     //    the folder sweep below is still worth attempting — but it is
     //    counted so the operator sees the purge was not clean.
     try {
       for (const transfer of await provider.listTransfers()) {
-        try { await provider.deleteTransfer(transfer.id); cancelled += 1; } catch { failed += 1; }
+        try { await provider.deleteTransfer(transfer.id); cancelled += 1; } catch (err) { note(`transfer ${transfer.id}`, err); }
       }
-    } catch {
-      failed += 1;
+    } catch (err) {
+      note('transfer list', err);
     }
 
     // 2. Sweep folders and files.
     try {
       const root = await provider.listFolder(null);
       for (const f of root.folders) {
-        try { await provider.deleteFolder(f.id); deleted += 1; } catch { failed += 1; }
+        try { await provider.deleteFolder(f.id); deleted += 1; } catch (err) { note(`folder ${f.id}`, err); }
       }
       for (const f of root.files) {
-        try { await provider.deleteFile(f.id); deleted += 1; } catch { failed += 1; }
+        try { await provider.deleteFile(f.id); deleted += 1; } catch (err) { note(`file ${f.id}`, err); }
       }
     } catch (err) {
       this.#getLibrary().recordActivity(
@@ -342,7 +356,7 @@ export class AdminActions {
       `Purged ${accountId}: ${deleted} Seedr item${deleted === 1 ? '' : 's'}, ` +
         `${cancelled} transfer${cancelled === 1 ? '' : 's'}, ` +
         `${removed} library row${removed === 1 ? '' : 's'}`,
-      failed > 0 ? `${failed} Seedr items failed` : 'ok',
+      failed > 0 ? `${failed} failed: ${failures.join('; ')}` : 'ok',
     );
     const result: AccountPurgeResult = {
       accountId,
@@ -350,6 +364,7 @@ export class AdminActions {
       transfersCancelled: cancelled,
       libraryDeleted: removed,
       failed,
+      failureReasons: failures,
     };
     return ok(result);
   }
@@ -604,10 +619,18 @@ export class AdminActions {
       return upstream(`Pool refresh failed: ${err instanceof Error ? err.message : String(err)}`);
     }
     try {
-      const allocation = pool.allocate(0);
+      // Size estimate from the last time this magnet was indexed, so the
+      // destination account can actually hold the content. Zero means no
+      // history and therefore no constraint.
+      const estimatedBytes = this.#getLibrary().estimateSizeForMagnet(record.magnet);
+      const allocation = pool.allocate(estimatedBytes);
       const transfer = await allocation.provider.addMagnet(record.magnet);
       this.#getLibrary().recordMagnet(displayName, record.magnet, allocation.accountId);
-      this.#getLibrary().recordActivity('info', `Re-added to ${allocation.accountId}`, displayName);
+      this.#getLibrary().recordActivity(
+        'info',
+        `Re-added to ${allocation.accountId}`,
+        displayName,
+      );
       pool.invalidateTransfers();
       void this.#indexer.scanAccount(allocation.provider).then(() => this.#enricher.tick());
       return ok({ accountId: allocation.accountId, transferId: transfer.id, displayName });
@@ -649,9 +672,16 @@ export class AdminActions {
 
     let allocation;
     try {
-      allocation = pool.allocate(0);
+      // The file's own size, not zero. allocate(0) could pick an account with
+      // 10 MB free for a 4 GB file and the transfer would sit at 0% forever.
+      allocation = pool.allocate(file.size);
     } catch (err) {
-      if (err instanceof NoCapacityError) return bad('No healthy account has space.', 409);
+      if (err instanceof NoCapacityError) {
+        return bad(
+          `No healthy account has ${formatBytes(file.size)} free. Free some storage first.`,
+          409,
+        );
+      }
       return upstream(err instanceof Error ? err.message : String(err));
     }
     if (allocation.accountId === sourceAccount) {

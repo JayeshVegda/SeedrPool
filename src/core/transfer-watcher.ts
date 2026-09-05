@@ -48,10 +48,25 @@ export class TransferWatcher {
     | null = null;
   #state = new Map<string, AccountState>();
   #timer: NodeJS.Timeout | null = null;
+  /**
+   * Unix ms of the last completed tick, 0 before the first.
+   *
+   * The health report keys its indexer freshness check on this rather than
+   * the indexer's `lastScanAt`: a scan only runs when a transfer completes,
+   * so a quiet-but-healthy pool would otherwise trip a staleness warning
+   * within 10 minutes of doing nothing wrong. The tick is the heartbeat;
+   * the scan is a consequence.
+   */
+  #lastTickAt = 0;
 
   constructor(pool: () => AccountPool, indexer: Indexer) {
     this.#pool = pool;
     this.#indexer = indexer;
+  }
+
+  /** Unix ms of the last completed poll, 0 before the first. */
+  get lastTickAt(): number {
+    return this.#lastTickAt;
   }
 
   /**
@@ -148,5 +163,11 @@ export class TransferWatcher {
         .scanAccount(provider)
         .then(() => this.#onCompletion?.(accountId, finishedIds));
     }
+
+    // Set only when the whole pass survived: a tick that threw partway must
+    // not count as a heartbeat, or the health check would call a dying
+    // watcher alive. (Today the body cannot throw — every failure path is
+    // caught per account — but the guarantee is what the flag means.)
+    this.#lastTickAt = Date.now();
   }
 }

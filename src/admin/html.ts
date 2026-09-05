@@ -59,6 +59,16 @@ function renderValue(value: unknown): string {
   return esc(value);
 }
 
+/**
+ * Shared byte formatting.
+ *
+ * One implementation for both the server-rendered pages and the client's
+ * toasts. The client used to carry its own copy and the two drifted — the
+ * server said "4.00 GiB" while a toast said "4.3 GB" for the same file. The
+ * function is serialized into the page (see `scriptTags`) so the browser runs
+ * the exact same code the server does, and a test asserts the serialized form
+ * matches the module export.
+ */
 export function formatBytes(bytes: number): string {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GiB`;
   if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
@@ -1343,6 +1353,11 @@ export function scriptTags(options: {
   jsPath: string;
 }): string {
   return `
+<script>
+  // The server's own byte formatter, serialized in place so the client can
+  // never drift from it. client.js reads window.formatBytes for toasts.
+  window.formatBytes = ${formatBytes.toString()};
+</script>
 <script type="module">
   // Default export, not named. See the note above.
   import toast from '${esc(options.sonnerPath)}';

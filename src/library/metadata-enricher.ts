@@ -21,6 +21,7 @@
 
 import type { LibraryStore } from './store.ts';
 import { TmdbClient } from './tmdb.ts';
+import { ENRICH_MAX_ATTEMPTS } from './store.ts';
 
 const ENRICH_INTERVAL_MS = 30 * 60_000;
 /** Cap on lookups per tick so a backlog of unmatched titles does not hammer TMDB. */
@@ -57,13 +58,33 @@ export class MetadataEnricher {
   }
 
   /**
+   * Whether lookups can happen at all, i.e. a TMDB key is configured.
+   * The health report surfaces this: without a key, new titles never get
+   * an IMDb id and stay invisible to Stremio, which looks like a bug in
+   * the addon if nobody says why.
+   */
+  get enabled(): boolean {
+    return this.#tmdb !== null && this.#tmdb.enabled;
+  }
+
+  /**
    * One enrichment pass. Public for tests and for the manual reindex button,
    * so a fresh title can be matched on demand.
+   *
+   * A title whose lookup ends with no match gets `recordEnrichFailure`. After
+   * `ENRICH_MAX_ATTEMPTS` it stops appearing in `titlesNeedingLookup` and this
+   * loop never touches it again — previously a title TMDB could never match
+   * was re-queried every 30 minutes forever, which burned quota, filled the
+   * log, and produced no result. The operator's recovery path is the admin's
+   * "re-fetch" button, which resets the counter.
    */
   async tick(): Promise<number> {
     if (this.#tmdb === null) return 0;
     const pending = this.#store.titlesNeedingLookup().slice(0, LOOKUPS_PER_TICK);
     let enriched = 0;
+    let gaveUp = 0;
+    /** Titles that crossed ENRICH_MAX_ATTEMPTS this tick, for one log line. */
+    const crossedLine: string[] = [];
 
     for (const title of pending) {
       try {
@@ -72,7 +93,14 @@ export class MetadataEnricher {
           year: title.year,
           kind: title.kind,
         });
-        if (match === null) continue;
+
+        if (match === null) {
+          const attempts = this.#store.recordEnrichFailure(title.key);
+          if (attempts >= ENRICH_MAX_ATTEMPTS) crossedLine.push(title.name);
+          gaveUp += 1;
+          continue;
+        }
+
         this.#store.setTitleIds(title.key, {
           imdbId: match.imdbId,
           tmdbId: match.tmdbId,
@@ -87,12 +115,30 @@ export class MetadataEnricher {
         );
         enriched += 1;
       } catch (err) {
+        // A transport or quota error says nothing about whether the title
+        // can match, so it must not consume one of the attempts. A 429 from
+        // TMDB during a burst would otherwise permanently give up on three
+        // titles that were never actually looked at.
         console.warn(
           `enrich: ${title.name} failed:`,
           err instanceof Error ? err.message : err,
         );
-        // One bad title must not stop the rest. The next tick retries.
       }
+    }
+    // One activity entry per title that crossed the line, not one per tick
+    // forever after — the whole point of the cap is silence.
+    for (const name of crossedLine) {
+      this.#store.recordActivity(
+        'warn',
+        `Metadata lookup gave up: ${name}`,
+        `${ENRICH_MAX_ATTEMPTS} attempts, no TMDB match. Use "re-fetch" on the library row to retry.`,
+      );
+    }
+    if (gaveUp > 0) {
+      console.warn(
+        `enrich: ${gaveUp} title${gaveUp === 1 ? '' : 's'} unmatched this tick` +
+          (crossedLine.length > 0 ? `, ${crossedLine.length} permanently` : ''),
+      );
     }
     return enriched;
   }

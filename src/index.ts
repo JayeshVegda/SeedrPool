@@ -22,6 +22,7 @@ import { Dumper } from './core/dumper.ts';
 import { AdminViews } from './core/admin-views.ts';
 import { AdminActions, type DumpResult } from './core/admin-actions.ts';
 import { buildAdminAssets, assetList } from './core/assets.ts';
+import { buildHealthReport, type HealthSources } from './core/health.ts';
 import {
   playbackLimiter,
   clientKey,
@@ -32,6 +33,30 @@ import { STYLES_BODY, layout } from './admin/html.ts';
 import { type AccountStatus } from './core/account-pool.ts';
 import { NoCapacityError } from './core/account-pool.ts';
 import { magnetDisplayName } from './admin/magnet-name.ts';
+
+// ---------------------------------------------------------------------------
+// Crash guards — installed before anything below can reject.
+//
+// Without these, one stray rejected promise from a background timer takes the
+// whole process down (Node's default for unhandledRejection). Docker restarts
+// it, but mid-download state dies silently and the operator finds out later.
+// `recordFatal` is late-bound: during startup `library` does not exist yet,
+// and a crash there is still a crash.
+// ---------------------------------------------------------------------------
+
+let recordFatal: (kind: string, err: unknown) => void = (_kind, _err) => {};
+
+process.on('unhandledRejection', (err) => {
+  console.error('FATAL unhandled rejection:', err instanceof Error ? (err.stack ?? err.message) : err);
+  recordFatal('unhandled rejection', err);
+  process.exit(1);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('FATAL uncaught exception:', err instanceof Error ? (err.stack ?? err.message) : err);
+  recordFatal('uncaught exception', err);
+  process.exit(1);
+});
 
 const config = await loadConfig();
 let credentials = await loadCredentials(config.credentialsPath);
@@ -45,6 +70,22 @@ for (const problem of credentials.problems) {
 
 let pool = new AccountPool(buildPoolEntries(credentials));
 let library = new LibraryStore(config.databasePath);
+
+// Now that the library exists, crashes also leave a trace in the activity
+// log — the one place the operator actually reads. If the DB is itself the
+// reason we are dying, this write fails and the console line above is the
+// only record, which is fine.
+recordFatal = (kind, err) => {
+  try {
+    library.recordActivity(
+      'bad',
+      `Process ${kind}`,
+      err instanceof Error ? err.message : String(err),
+    );
+  } catch {
+    /* already logged to the console */
+  }
+};
 const indexer = new Indexer(library, () => pool);
 const tmdb = new TmdbClient(config.tmdbApiKey);
 const enricher = new MetadataEnricher(library, tmdb);
@@ -53,6 +94,46 @@ const watcher = new TransferWatcher(() => pool, indexer);
 const views = new AdminViews(() => pool, library);
 
 const dumper = new Dumper({ directory: config.dumpsDir });
+
+/**
+ * One health snapshot, shared by /healthz, the admin health page, and the
+ * container healthcheck. The sources are getters so each report sees the
+ * current pool (which rebuildPool() can replace) rather than a stale one.
+ */
+function healthSources(): HealthSources {
+  return {
+    db: library,
+    pool,
+    // The watcher's poll heartbeat, not the indexer's scan timestamp: a scan
+    // only runs when a transfer completes, so a quiet pool is healthy.
+    indexer: { lastTickAt: watcher.lastTickAt },
+    enricher,
+    store: library,
+  };
+}
+
+/**
+ * The readiness endpoint.
+ *
+ * 200 = every check ok or merely warned; 503 = at least one check is bad, so
+ * an uptime monitor (or `docker compose ps`) sees the failure instead of a
+ * process that is merely alive. Warn does not fail the probe: a pool at 25%
+ * healthy or a stale index still serves traffic, and flipping the container
+ * to unhealthy over it would trigger restart loops that make things worse.
+ */
+function healthz(): Response {
+  const report = buildHealthReport(healthSources());
+  const body = JSON.stringify(
+    { status: report.status, checks: report.checks },
+    null,
+    process.env['NODE_ENV'] === 'production' ? 0 : 2,
+  );
+  return new Response(body, {
+    status: report.status === 'bad' ? 503 : 200,
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+  });
+}
+
 const DUMP_INTERVAL_MS = 6 * 60 * 60_000;
 async function runDump(): Promise<DumpResult> {
   try {
@@ -116,6 +197,7 @@ const admin = new AdminApp({
   views,
   assets,
   runDump,
+  healthReport: () => buildHealthReport(healthSources()),
 });
 
 indexer.setOnScanComplete(async () => {
@@ -165,8 +247,11 @@ const router = new Router()
   .get('/admin/accounts/:accountId', (ctx) => admin.accountDetailPage(ctx))
   .get('/admin/activity', (ctx) => admin.activity(ctx))
   .get('/admin/dumps', () => admin.dumps())
-  .get('/admin/health', () => admin.transferCount())
-  .get('/healthz', () => new Response('ok'))
+  // Centralized health, same checks as /healthz but rendered for humans.
+  // Previously this returned `transferCount()` — a copy-paste leftover that
+  // answered `{"count":N}` to anyone expecting a health document.
+  .get('/admin/health', () => admin.healthPage())
+  .get('/healthz', healthz)
 
   // ---- JSON action endpoints (item 9: rich toasts, no page replacement) ----
   //
@@ -309,7 +394,14 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
     console.log(`\n${signal} received, closing`);
     clearInterval(dumpTimer);
+    enricher.stop();
     watcher.stop();
+    // library.close() checkpoints the WAL (TRUNCATE) before closing, so a
+    // restart after OOM or host reboot finds a compact database rather than
+    // a dirty WAL.
     server.close(() => { library.close(); process.exit(0); });
+    // If a hung keep-alive connection holds the close open, do not wait
+    // forever — the container runtime will SIGKILL after its grace period.
+    setTimeout(() => { library.close(); process.exit(0); }, 10_000).unref();
   });
 }

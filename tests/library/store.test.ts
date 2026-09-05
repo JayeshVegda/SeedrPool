@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { LibraryStore } from '../../src/library/store.ts';
+import { mkdtempSync, rmSync, existsSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { LibraryStore, ENRICH_MAX_ATTEMPTS } from '../../src/library/store.ts';
 
 describe('LibraryStore', () => {
   let store: LibraryStore;
@@ -338,5 +341,141 @@ describe('LibraryStore', () => {
     expect(stats.files).toBe(1);
     expect(stats.totalSize).toBe(1_000_000);
     expect(stats.subtitles).toBe(1);
+  });
+});
+
+describe('LibraryStore durability', () => {
+  // These pin the WAL setup that keeps the addon's reads from blocking the
+  // indexer's writes, and the shutdown path that folds the WAL back in.
+  // Production measured a 407 KB WAL against a 72 KB database before
+  // wal_autocheckpoint existed — the file grew until restart.
+
+  function tempDb(): { store: LibraryStore; path: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'seedrpool-store-'));
+    const path = join(dir, 'library.sqlite');
+    return { store: new LibraryStore(path), path };
+  }
+
+  it('runs in WAL mode with an autocheckpoint below the default', () => {
+    const { store } = tempDb();
+    try {
+      const mode = store.rawDb().prepare('PRAGMA journal_mode').get() as { journal_mode: string };
+      expect(mode.journal_mode).toBe('wal');
+      const pages = store.rawDb().prepare('PRAGMA wal_autocheckpoint').get() as {
+        wal_autocheckpoint: number;
+      };
+      // The default is 1000 pages. We set 512 so a checkpoint actually happens
+      // on a small database before the file grows.
+      expect(Number(pages.wal_autocheckpoint)).toBeLessThan(1000);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('sets a busy timeout so a restart race waits instead of throwing', () => {
+    const { store } = tempDb();
+    try {
+      const row = store.rawDb().prepare('PRAGMA busy_timeout').get() as { timeout: number };
+      expect(Number(row.timeout)).toBeGreaterThanOrEqual(1000);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('ping() proves the handle is alive, and fails once closed', () => {
+    const { store } = tempDb();
+    expect(() => store.ping()).not.toThrow();
+    store.close();
+    // After close, ping is the health report's way of noticing a dead DB.
+    expect(() => store.ping()).toThrow();
+  });
+
+  it('close() truncates the WAL so a restart finds a compact database', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'seedrpool-store-'));
+    const path = join(dir, 'library.sqlite');
+    const store = new LibraryStore(path);
+    // Generate some WAL traffic: every insert after the first checkpoint
+    // lands in the WAL until it is folded in.
+    for (let i = 0; i < 50; i += 1) {
+      store.upsertTitle({
+        key: `t${i}`,
+        name: `Movie ${i}`,
+        year: 2000,
+        kind: 'movie',
+        addedAt: Date.now() + i,
+      });
+    }
+    store.close();
+    const wal = `${path}-wal`;
+    // A clean close either truncates the WAL or removes it entirely — both
+    // mean no dirty pages were left behind for the next open to recover.
+    if (existsSync(wal)) expect(statSync(wal).size).toBe(0);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('records and caps enrich failures, and clearTitleIds resets them', () => {
+    const store = new LibraryStore(':memory:');
+    try {
+      store.upsertTitle({ key: 'x', name: 'X', year: null, kind: 'movie', addedAt: 1 });
+      expect(store.titlesNeedingLookup().map((t) => t.key)).toEqual(['x']);
+
+      for (let i = 1; i <= ENRICH_MAX_ATTEMPTS; i += 1) {
+        expect(store.recordEnrichFailure('x')).toBe(i);
+      }
+      // Past the cap the title leaves the queue for good.
+      expect(store.titlesNeedingLookup()).toEqual([]);
+      expect(store.givenUpTitlesCount()).toBe(1);
+
+      // The operator's reset path.
+      store.clearTitleIds('x');
+      expect(store.titlesNeedingLookup().map((t) => t.key)).toEqual(['x']);
+      expect(store.givenUpTitlesCount()).toBe(0);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('estimateSizeForMagnet sums the sizes of files from the same magnet', () => {
+    const store = new LibraryStore(':memory:');
+    try {
+      store.upsertTitle({ key: 'm', name: 'M', year: null, kind: 'movie', addedAt: 1 });
+      for (let i = 0; i < 3; i += 1) {
+        store.upsertFile({
+          fileId: String(i),
+          accountId: 'acc1',
+          folderId: '10',
+          name: `part${i}.mkv`,
+          size: 1024,
+          hash: null,
+          titleKey: 'm',
+          season: null,
+          episode: null,
+          resolution: null,
+          group: null,
+          seenAt: 1,
+          magnet: 'magnet:?xt=urn:btih:same',
+        });
+      }
+      store.upsertFile({
+        fileId: '9',
+        accountId: 'acc1',
+        folderId: '10',
+        name: 'other.mkv',
+        size: 4096,
+        hash: null,
+        titleKey: 'm',
+        season: null,
+        episode: null,
+        resolution: null,
+        group: null,
+        seenAt: 1,
+        magnet: 'magnet:?xt=urn:btih:other',
+      });
+      expect(store.estimateSizeForMagnet('magnet:?xt=urn:btih:same')).toBe(3 * 1024);
+      // No history means no constraint, not a refusal.
+      expect(store.estimateSizeForMagnet('magnet:?xt=urn:btih:unknown')).toBe(0);
+    } finally {
+      store.close();
+    }
   });
 });

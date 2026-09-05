@@ -87,6 +87,17 @@ export interface SubtitleFile {
   language: string | null;
 }
 
+/**
+ * Metadata-lookup attempts before the enricher stops trying a title.
+ *
+ * Three is enough to ride out a TMDB hiccup and still notice a genuinely
+ * unmatchable name within a day of the 30-minute safety-net tick. Past this,
+ * the title stays in the library and the admin, but the addon will not list
+ * it (no IMDb id) and the operator's recovery path is the per-title
+ * "re-fetch" button, which resets the counter.
+ */
+export const ENRICH_MAX_ATTEMPTS = 3;
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS titles (
   key      TEXT PRIMARY KEY,
@@ -95,7 +106,12 @@ CREATE TABLE IF NOT EXISTS titles (
   kind     TEXT NOT NULL,
   added_at INTEGER NOT NULL,
   imdb_id  TEXT,
-  tmdb_id  INTEGER
+  tmdb_id  INTEGER,
+  -- Metadata-lookup failure counter. The enricher gives up after
+  -- ENRICH_MAX_ATTEMPTS tries; a title that can never match TMDB must not
+  -- be re-queried every 30 minutes forever, burning quota and log lines.
+  -- NULL is treated as 0 for rows predating the column.
+  enrich_attempts INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS files (
@@ -177,9 +193,22 @@ export class LibraryStore {
       mkdirSync(dirname(path), { recursive: true });
     }
     this.#db = new DatabaseSync(path);
-    // WAL keeps reads (addon requests) from blocking the indexer's writes.
+    // Durability pragmas. The order matters: busy_timeout first so none of
+    // the setup below can throw SQLITE_BUSY against a still-running previous
+    // instance's WAL.
     if (path !== ':memory:') {
+      // WAL keeps reads (addon requests) from blocking the indexer's writes.
       this.#db.exec('PRAGMA journal_mode = WAL');
+      // 5 s: a restart race or a long indexer transaction must fail over
+      // into a wait, not into an immediate SQLITE_BUSY error.
+      this.#db.exec('PRAGMA busy_timeout = 5000');
+      // Cap the WAL at 8 MiB rather than the 1000-page default, and pass
+      // TRUNCATE so a checkpoint rewrites the file instead of leaving a
+      // sparse tail. Without this, a read-heavy process that never closes
+      // its connection (the addon serving streams) blocks every automatic
+      // checkpoint and the WAL grows until restart — measured 407 KB
+      // against a 72 KB database within a day of real traffic.
+      this.#db.exec('PRAGMA wal_autocheckpoint = 512');
     }
     this.#db.exec('PRAGMA foreign_keys = ON');
     // Run the migration before the schema. SCHEMA references the
@@ -189,6 +218,7 @@ export class LibraryStore {
     this.#addColumnIfMissing('titles', 'imdb_id', 'TEXT');
     this.#addColumnIfMissing('titles', 'tmdb_id', 'INTEGER');
     this.#addColumnIfMissing('files', 'magnet', 'TEXT');
+    this.#addColumnIfMissing('titles', 'enrich_attempts', 'INTEGER NOT NULL DEFAULT 0');
     this.#db.exec(SCHEMA);
   }
 
@@ -212,6 +242,26 @@ export class LibraryStore {
 
 
   close(): void {
+    this.close = this.#checkpointOnClose;
+    this.#checkpointOnClose();
+  }
+
+  /**
+   * Checkpoints the WAL and closes the handle.
+   *
+   * A plain `close()` leaves the WAL file on disk with whatever pages the
+   * last checkpoint did not fold in. On the SIGTERM path we want the
+   * database fully compacted, because the container may not come back up
+   * (OOM, host reboot) and a dirty WAL is one more thing that can go wrong
+   * while nobody is watching. TRUNCATE resets the file to zero bytes.
+   */
+  #checkpointOnClose(): void {
+    try {
+      this.#db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    } catch {
+      // A checkpoint failure must not prevent the close itself; the WAL
+      // will be recovered by SQLite on next open either way.
+    }
     this.#db.close();
   }
 
@@ -328,6 +378,51 @@ export class LibraryStore {
     if (ids.tmdbId !== undefined) {
       this.#db.prepare('UPDATE titles SET tmdb_id = ? WHERE key = ?').run(ids.tmdbId, key);
     }
+  }
+
+  /**
+   * Counts one failed metadata lookup for a title.
+   *
+   * The enricher calls this whenever a lookup ends without a match. Once the
+   * count reaches `ENRICH_MAX_ATTEMPTS` the title leaves the work queue
+   * permanently — see `titlesNeedingLookup`. A title that TMDB will never
+   * match (a typo in the release name, an obscure regional cut) used to be
+   * re-queried every 30 minutes forever, burning quota and never becoming
+   * visible in Stremio.
+   *
+   * Returns the attempt count after the increment, so the caller can notice
+   * the crossing without a second query.
+   */
+  recordEnrichFailure(key: string): number {
+    this.#db
+      .prepare('UPDATE titles SET enrich_attempts = COALESCE(enrich_attempts, 0) + 1 WHERE key = ?')
+      .run(key);
+    const row = this.#db
+      .prepare('SELECT enrich_attempts FROM titles WHERE key = ?')
+      .get(key) as { enrich_attempts: number | null };
+    return row === undefined ? 0 : Number(row.enrich_attempts ?? 0);
+  }
+
+  /**
+   * Resets a title's lookup state so the enricher will try again.
+   *
+   * The manual recovery path: the admin's "re-fetch" buttons call
+   * `clearTitleIds`, which now also clears the failure count, so a title the
+   * automatic loop gave up on can be re-queued by a human who has fixed the
+   * reason it never matched (typically a wrong title in the release name).
+   */
+  clearTitleIds(key: string): void {
+    this.#db
+      .prepare('UPDATE titles SET imdb_id = NULL, tmdb_id = NULL, enrich_attempts = 0 WHERE key = ?')
+      .run(key);
+  }
+
+  /** Clears every title's metadata ids. Used by "re-fetch all metadata". */
+  clearAllTitleIds(): number {
+    const r = this.#db
+      .prepare('UPDATE titles SET imdb_id = NULL, tmdb_id = NULL, enrich_attempts = 0')
+      .run();
+    return Number(r.changes);
   }
 
   /**
@@ -481,9 +576,10 @@ export class LibraryStore {
         `SELECT key, name, year, kind, imdb_id, tmdb_id
          FROM titles
          WHERE imdb_id IS NULL
+           AND COALESCE(enrich_attempts, 0) < ?
          ORDER BY added_at ASC`,
       )
-      .all();
+      .all(ENRICH_MAX_ATTEMPTS);
     return rows.map((row) => ({
       key: String(row['key']),
       name: String(row['name']),
@@ -492,6 +588,36 @@ export class LibraryStore {
       imdbId: row['imdb_id'] === null ? null : String(row['imdb_id']),
       tmdbId: row['tmdb_id'] === null ? null : Number(row['tmdb_id']),
     }));
+  }
+
+  /** Number of titles the enricher has permanently given up on. */
+  givenUpTitlesCount(): number {
+    const row = this.#db
+      .prepare(
+        'SELECT COUNT(*) AS n FROM titles WHERE imdb_id IS NULL AND COALESCE(enrich_attempts, 0) >= ?',
+      )
+      .get(ENRICH_MAX_ATTEMPTS) as { n: number };
+    return Number(row.n);
+  }
+
+  /**
+   * Best-effort size estimate for a magnet we have indexed before.
+   *
+   * Sums the sizes of file rows recorded from the same magnet. Used by
+   * `moveFile` and `reAddMagnet` to pick a destination account that can
+   * actually hold the content — `allocate(0)` used to be passed instead, so
+   * the pool could happily pick an account with 10 MB free for a 4 GB file
+   * and the transfer then sat at 0% forever.
+   *
+   * Returns 0 when nothing was ever indexed for this magnet. Zero means "no
+   * estimate", and the allocator treats it as no constraint, which is the old
+   * behaviour — better to place somewhere imperfect than to refuse.
+   */
+  estimateSizeForMagnet(magnet: string): number {
+    const row = this.#db
+      .prepare('SELECT COALESCE(SUM(size), 0) AS total FROM files WHERE magnet = ?')
+      .get(magnet) as { total: number };
+    return Number(row.total);
   }
 
   /**
@@ -861,17 +987,6 @@ export class LibraryStore {
     }));
   }
 
-  /** Clears the IMDb/TMDB ids for a title so the enricher looks it up again. */
-  clearTitleIds(key: string): void {
-    this.#db.prepare('UPDATE titles SET imdb_id = NULL, tmdb_id = NULL WHERE key = ?').run(key);
-  }
-
-  /** Clears every title's metadata ids. Used by "re-fetch all metadata". */
-  clearAllTitleIds(): number {
-    const r = this.#db.prepare('UPDATE titles SET imdb_id = NULL, tmdb_id = NULL').run();
-    return Number(r.changes);
-  }
-
   /** Runs `fn` in a transaction, so a failed scan leaves no partial state. */
   transaction<T>(fn: () => T): T {
     this.#db.exec('BEGIN');
@@ -883,6 +998,27 @@ export class LibraryStore {
       this.#db.exec('ROLLBACK');
       throw err;
     }
+  }
+
+  /**
+   * Proves the database handle is alive and not locked.
+   *
+   * The health report calls this on every `/healthz`. It must stay trivially
+   * cheap — a scalar select — because the container healthcheck runs it
+   * every 30 s.
+   */
+  ping(): void {
+    this.#db.prepare('SELECT 1').get();
+  }
+
+  /**
+   * The underlying handle, for tests that assert PRAGMA state.
+   *
+   * Not used by application code: everything goes through the prepared
+   * statements so the schema knowledge stays in one place.
+   */
+  rawDb(): DatabaseSync {
+    return this.#db;
   }
 }
 

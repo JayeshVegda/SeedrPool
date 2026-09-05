@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { TmdbClient, posterUrl, backdropUrl } from '../../src/library/tmdb.ts';
 import { MetadataEnricher } from '../../src/library/metadata-enricher.ts';
-import { LibraryStore } from '../../src/library/store.ts';
+import { LibraryStore, ENRICH_MAX_ATTEMPTS } from '../../src/library/store.ts';
 import type { LibraryTitle } from '../../src/library/store.ts';
 import type { TmdbMatch, TitleQuery } from '../../src/library/tmdb.ts';
 
@@ -216,5 +216,108 @@ describe('MetadataEnricher', () => {
     expect(enricher.isRunning).toBe(true);
     enricher.stop();
     expect(enricher.isRunning).toBe(false);
+  });
+
+  // -----------------------------------------------------------------
+  // Failure cap. A title TMDB can never match used to be re-queried every
+  // 30 minutes forever — burning quota, filling the log, never resolving.
+  // -----------------------------------------------------------------
+
+  function seedUnmatchable(key = 'mystery'): void {
+    store.upsertTitle({
+      key,
+      name: 'Totally Unfindable Regional Cut 1987',
+      year: 1987,
+      kind: 'movie',
+      addedAt: 1000,
+      imdbId: null,
+      tmdbId: null,
+    });
+  }
+
+  it('counts a null match as one attempt and eventually stops asking', async () => {
+    seedUnmatchable();
+    const spy = vi.spyOn(client, 'findMatch').mockResolvedValue(null);
+
+    // Tick once per "30 minutes" until the cap is crossed.
+    for (let i = 0; i < ENRICH_MAX_ATTEMPTS; i += 1) {
+      await enricher.tick();
+    }
+    expect(spy).toHaveBeenCalledTimes(ENRICH_MAX_ATTEMPTS);
+
+    // The title is now past the cap and must not be queried again.
+    await enricher.tick();
+    expect(spy).toHaveBeenCalledTimes(ENRICH_MAX_ATTEMPTS);
+  });
+
+  it('leaves a warning in the activity log when it gives up, exactly once', async () => {
+    seedUnmatchable();
+    vi.spyOn(client, 'findMatch').mockResolvedValue(null);
+
+    for (let i = 0; i < ENRICH_MAX_ATTEMPTS + 1; i += 1) await enricher.tick();
+
+    const warnings = store
+      .recentActivity(50)
+      .filter((a) => a.message.includes('gave up'));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.detail).toMatch(/re-fetch/);
+  });
+
+  it('a lookup error does not consume an attempt', async () => {
+    // A 429 or a network blip says nothing about whether the title matches.
+    // Consuming attempts on it would permanently give up on titles that were
+    // never actually looked at.
+    seedUnmatchable();
+    vi.spyOn(client, 'findMatch').mockRejectedValue(new Error('HTTP 429'));
+
+    for (let i = 0; i < 10; i += 1) await enricher.tick();
+
+    // Still in the queue — the transport error never counted.
+    expect(store.titlesNeedingLookup().map((t) => t.key)).toContain('mystery');
+    expect(store.givenUpTitlesCount()).toBe(0);
+  });
+
+  it('clearTitleIds resets the counter, so a human can retry a lost cause', async () => {
+    seedUnmatchable();
+    vi.spyOn(client, 'findMatch').mockResolvedValue(null);
+    for (let i = 0; i < ENRICH_MAX_ATTEMPTS; i += 1) await enricher.tick();
+    expect(store.givenUpTitlesCount()).toBe(1);
+
+    // The operator pressed "re-fetch" on the library row.
+    store.clearTitleIds('mystery');
+    expect(store.givenUpTitlesCount()).toBe(0);
+    expect(store.titlesNeedingLookup().map((t) => t.key)).toContain('mystery');
+  });
+
+  it('a successful match after failures clears the path without retrying', async () => {
+    seedUnmatchable();
+    // Fail twice, then succeed.
+    const spy = vi
+      .spyOn(client, 'findMatch')
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(match({ imdbId: 'tt0000001', tmdbId: 1 }));
+    await enricher.tick();
+    await enricher.tick();
+    const touched = await enricher.tick();
+
+    expect(touched).toBe(1);
+    expect(store.getTitle('mystery')?.imdbId).toBe('tt0000001');
+    // Never queried again: it has an id now.
+    await enricher.tick();
+    expect(spy).toHaveBeenCalledTimes(3);
+    expect(store.givenUpTitlesCount()).toBe(0);
+  });
+
+  it('givenUpTitlesCount only counts titles past the cap', async () => {
+    seedUnmatchable('lost');
+    seedUnmatchable('still-trying');
+    vi.spyOn(client, 'findMatch').mockResolvedValue(null);
+
+    await enricher.tick(); // both at 1
+    await enricher.tick(); // both at 2
+    expect(store.givenUpTitlesCount()).toBe(0);
+    await enricher.tick(); // both at 3 = capped
+    expect(store.givenUpTitlesCount()).toBe(2);
   });
 });

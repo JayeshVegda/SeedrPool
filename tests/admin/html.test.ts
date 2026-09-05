@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { esc, html, raw, formatBytes, layout } from '../../src/admin/html.ts';
 import {
   Router,
@@ -109,6 +112,20 @@ describe('layout', () => {
   it('links the hashed stylesheet', () => {
     const page = layout({ title: 'x', body: '', ...PATHS });
     expect(page).toContain(`<link rel="stylesheet" href="${PATHS.cssPath}">`);
+  });
+
+  it('serializes formatBytes into the page so the client cannot drift from it', () => {
+    // The toast layer renders free-space figures. It used to carry its own
+    // copy of the formatter, and the two disagreed (GB vs GiB, different
+    // decimals) on the same number.
+    const page = layout({ title: 'x', body: '', ...PATHS });
+    expect(page).toContain(`window.formatBytes = ${formatBytes.toString()}`);
+    // The client must actually use the injected one when present.
+    const client = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../src/admin/client.js'),
+      'utf8',
+    );
+    expect(client).toContain("typeof window.formatBytes === 'function'");
   });
 });
 

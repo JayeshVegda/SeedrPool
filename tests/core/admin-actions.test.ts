@@ -709,6 +709,89 @@ describe('moveFile', () => {
     expect(res.status).toBe(409);
     expect(h.providers['acc1']!.deletedFiles).toEqual([]);
   });
+
+  // -----------------------------------------------------------------
+  // Size-aware allocation. allocate(0) used to be passed everywhere, so
+  // the pool could pick an account with 10 MB free for a 4 GB file and
+  // the transfer sat at 0% forever.
+  // -----------------------------------------------------------------
+
+  it('move: rejects with 409 and names the size when no account can hold the file', async () => {
+    h = await harness({ accounts: ['acc1', 'acc2'] });
+    addFile(h, {
+      accountId: 'acc1',
+      fileId: '20',
+      name: 'Big.Remux.mkv',
+      magnet: 'magnet:?xt=urn:btih:abc&dn=Big',
+    });
+    // Overwrite the seeded 1 GiB size with something neither account can fit.
+    h.library.upsertFile({
+      fileId: '20',
+      accountId: 'acc1',
+      folderId: '10',
+      name: 'Big.Remux.mkv',
+      size: 4 * GIB,
+      hash: null,
+      titleKey: 'title-acc1-20',
+      season: null,
+      episode: null,
+      resolution: 1080,
+      group: null,
+      seenAt: Date.now(),
+      magnet: 'magnet:?xt=urn:btih:abc&dn=Big',
+    });
+    // makeQuota(used, max): 9 and 9.5 used leaves 1.0 and 0.5 GiB free.
+    h.providers['acc1']!.quota = makeQuota(9 * GIB, 10 * GIB);
+    h.providers['acc2']!.quota = makeQuota(9.5 * GIB, 10 * GIB);
+    await h.pool.refresh({ force: true });
+
+    const res = await h.actions.moveFile(post({ accountId: 'acc1', fileId: '20' }));
+    const body = await bodyOf(res);
+
+    expect(res.status).toBe(409);
+    expect(body.error).toMatch(/4\.00 GiB/);
+    expect(h.providers['acc2']!.addedMagnets).toEqual([]);
+  });
+
+  it('move: prefers the destination with real room over the one that cannot fit', async () => {
+    h = await harness({ accounts: ['acc1', 'acc2', 'acc3'] });
+    addFile(h, {
+      accountId: 'acc1',
+      fileId: '20',
+      magnet: 'magnet:?xt=urn:btih:abc&dn=Movie',
+    });
+    // The seeded file is 1 GiB. acc2 has only 0.5 GiB free; acc3 has 5.
+    h.providers['acc1']!.quota = makeQuota(8 * GIB, 10 * GIB);
+    h.providers['acc2']!.quota = makeQuota(9.5 * GIB, 10 * GIB);
+    h.providers['acc3']!.quota = makeQuota(5 * GIB, 10 * GIB);
+    await h.pool.refresh({ force: true });
+
+    const body = await bodyOf(await h.actions.moveFile(post({ accountId: 'acc1', fileId: '20' })));
+
+    expect(body.data.accountId).toBe('acc3');
+    expect(h.providers['acc3']!.addedMagnets).toHaveLength(1);
+  });
+
+  it("re-add: passes the magnet's indexed size to the allocator", async () => {
+    h = await harness({ accounts: ['acc1', 'acc2'] });
+    h.library.recordMagnet('Movie.2024', 'magnet:?xt=urn:btih:abc&dn=Movie.2024', 'acc1');
+    addFile(h, {
+      accountId: 'acc1',
+      fileId: '20',
+      name: 'Movie.2024.1080p.mkv',
+      magnet: 'magnet:?xt=urn:btih:abc&dn=Movie.2024',
+    });
+
+    // The seeded file is 1 GiB. acc1 has no room; only acc2 does.
+    h.providers['acc1']!.quota = makeQuota(9.5 * GIB, 10 * GIB);
+    h.providers['acc2']!.quota = makeQuota(2 * GIB, 10 * GIB);
+    await h.pool.refresh({ force: true });
+
+    const body = await bodyOf(await h.actions.reAddMagnet(post({ displayName: 'Movie.2024' })));
+
+    expect(body.ok).toBe(true);
+    expect(body.data.accountId).toBe('acc2');
+  });
 });
 
 describe('reAddMagnet', () => {
